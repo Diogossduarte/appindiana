@@ -1,0 +1,1584 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Painel do Representante</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', 'Segoe UI', sans-serif; }
+    #root { min-height: 100vh; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script type="text/babel" data-presets="react">
+    const { useState, useCallback, useMemo, useRef, useEffect } = React;
+
+// ─── Tokens de design ────────────────────────────────────────────────────────
+const T = {
+  navy:    "#0A0F1E",
+  petrol:  "#1E3A5F",
+  mint:    "#00C9A7",
+  coral:   "#FF6B6B",
+  amber:   "#FFD93D",
+  snow:    "#F0F4FF",
+  surface: "#FFFFFF",
+  border:  "rgba(255,255,255,0.08)",
+  borderL: "#E4E9F4",
+  text:    "#0A0F1E",
+  sub:     "#64748B",
+  hint:    "#94A3B8",
+};
+
+// ─── Códigos padrão do representante ─────────────────────────────────────────
+const DEFAULT_CODIGOS = [
+  173332,173330,168962,173331,167725,123199,123197,123200,
+  171721,14802,191547,66940,111696,144868,66941,144870,
+  89061,160245,160247,160248,160244,197873,197872,117553,
+  164619,154096,184435,141999,177889,168773,168895,191674,
+  191673,191675,179340,89277,89276,190818,133675,181948,
+  82768,198789,144052,144053,144051,193350,196284,196286,
+  186182,186350,191672,132304,180693,180691,
+];
+
+function loadSavedCodigos() {
+  try {
+    const raw = localStorage.getItem("meus_codigos");
+    if (raw) return new Set(JSON.parse(raw).map(Number));
+  } catch {}
+  return new Set(DEFAULT_CODIGOS);
+}
+
+// ─── Modal de configuração de produtos ───────────────────────────────────────
+function SettingsModal({ allRows, meusCodigos, onSave, onClose }) {
+  const [busca, setBusca] = useState("");
+  // Conjunto editável (cópia local durante edição)
+  const [selecionados, setSelecionados] = useState(() => new Set(meusCodigos));
+
+  // Produtos únicos da planilha: { cod, nome }
+  const todosProdutos = useMemo(() => {
+    const map = new Map();
+    allRows.forEach(r => {
+      const cod = Number(r.codProduto);
+      if (cod && !map.has(cod)) map.set(cod, r.produto);
+    });
+    return [...map.entries()]
+      .map(([cod, nome]) => ({ cod, nome }))
+      .sort((a,b) => a.nome.localeCompare(b.nome));
+  }, [allRows]);
+
+  const filtrados = useMemo(() => {
+    if (!busca.trim()) return todosProdutos;
+    const q = busca.toUpperCase();
+    return todosProdutos.filter(p =>
+      p.nome.toUpperCase().includes(q) || String(p.cod).includes(q)
+    );
+  }, [todosProdutos, busca]);
+
+  function toggle(cod) {
+    setSelecionados(prev => {
+      const next = new Set(prev);
+      next.has(cod) ? next.delete(cod) : next.add(cod);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    const todosVisiveis = filtrados.map(p => p.cod);
+    const todosSelecionados = todosVisiveis.every(c => selecionados.has(c));
+    setSelecionados(prev => {
+      const next = new Set(prev);
+      todosVisiveis.forEach(c => todosSelecionados ? next.delete(c) : next.add(c));
+      return next;
+    });
+  }
+
+  function resetPadrao() { setSelecionados(new Set(DEFAULT_CODIGOS)); }
+
+  function salvar() {
+    try { localStorage.setItem("meus_codigos", JSON.stringify([...selecionados])); } catch {}
+    onSave(selecionados);
+    onClose();
+  }
+
+  const todosVisivelSelecionados = filtrados.length > 0 &&
+    filtrados.every(p => selecionados.has(p.cod));
+
+  return (
+    // Overlay
+    <div style={{ position:"fixed", inset:0, zIndex:1000,
+      background:"rgba(10,15,30,0.7)", display:"flex",
+      alignItems:"center", justifyContent:"center", padding:20 }}
+      onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
+
+      <div style={{ background:T.surface, borderRadius:20, width:"100%", maxWidth:560,
+        maxHeight:"88vh", display:"flex", flexDirection:"column",
+        boxShadow:"0 24px 80px rgba(10,15,30,0.35)", overflow:"hidden" }}>
+
+        {/* Header do modal */}
+        <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${T.borderL}`,
+          display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+            <div style={{ width:36, height:36, borderRadius:10, background:T.navy,
+              display:"flex", alignItems:"center", justifyContent:"center" }}>
+              {/* Ícone engrenagem */}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                stroke={T.mint} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontWeight:800, fontSize:15, color:T.text }}>Meus produtos</div>
+              <div style={{ fontSize:12, color:T.sub }}>
+                {selecionados.size} selecionado{selecionados.size!==1?"s":""}
+                {" de "}{todosProdutos.length} disponíveis
+              </div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background:"#F1F5F9", border:"none",
+            cursor:"pointer", color:T.sub, width:32, height:32, borderRadius:8,
+            fontSize:16, display:"flex", alignItems:"center", justifyContent:"center",
+            fontWeight:700 }}>×</button>
+        </div>
+
+        {/* Busca + ações */}
+        <div style={{ padding:"14px 24px", borderBottom:`1px solid ${T.borderL}`,
+          display:"flex", gap:10, alignItems:"center" }}>
+          <div style={{ flex:1, position:"relative" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke={T.hint} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+              style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)" }}>
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input value={busca} onChange={e=>setBusca(e.target.value)}
+              placeholder="Buscar por nome ou código..."
+              style={{ width:"100%", padding:"8px 10px 8px 32px", fontSize:13,
+                border:`1.5px solid ${T.borderL}`, borderRadius:10, outline:"none",
+                color:T.text, background:T.snow, boxSizing:"border-box" }}/>
+          </div>
+          <button onClick={toggleAll}
+            style={{ padding:"8px 12px", fontSize:12, fontWeight:600, cursor:"pointer",
+              border:`1.5px solid ${T.borderL}`, borderRadius:10, background:T.surface,
+              color:T.sub, whiteSpace:"nowrap", transition:"all 0.15s" }}>
+            {todosVisivelSelecionados ? "Desmarcar visíveis" : "Marcar visíveis"}
+          </button>
+          <button onClick={resetPadrao}
+            style={{ padding:"8px 12px", fontSize:12, fontWeight:600, cursor:"pointer",
+              border:`1.5px solid ${T.borderL}`, borderRadius:10, background:T.surface,
+              color:T.sub, whiteSpace:"nowrap", transition:"all 0.15s" }}>
+            Restaurar padrão
+          </button>
+        </div>
+
+        {/* Lista de produtos */}
+        <div style={{ flex:1, overflowY:"auto", padding:"8px 0" }}>
+          {filtrados.length === 0 && (
+            <div style={{ padding:"40px", textAlign:"center", color:T.hint, fontSize:13 }}>
+              Nenhum produto encontrado.
+            </div>
+          )}
+          {filtrados.map((p, i) => {
+            const on = selecionados.has(p.cod);
+            return (
+              <div key={p.cod} onClick={()=>toggle(p.cod)}
+                style={{ display:"flex", alignItems:"center", gap:14, padding:"10px 24px",
+                  cursor:"pointer", transition:"background 0.1s",
+                  background:on?"#F0FDF9":T.surface,
+                  borderBottom:i<filtrados.length-1?`1px solid ${T.borderL}`:"none" }}
+                onMouseEnter={e=>{ e.currentTarget.style.background=on?"#E6FBF5":"#F8FAFF"; }}
+                onMouseLeave={e=>{ e.currentTarget.style.background=on?"#F0FDF9":T.surface; }}>
+
+                {/* Checkbox */}
+                <div style={{ width:20, height:20, borderRadius:6, flexShrink:0,
+                  background:on?T.mint:T.surface,
+                  border:`2px solid ${on?T.mint:T.borderL}`,
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  transition:"all 0.15s" }}>
+                  {on && <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                    <polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2.2"
+                      strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>}
+                </div>
+
+                {/* Info do produto */}
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:on?700:500, color:on?"#065F46":T.text,
+                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                    {p.nome}
+                  </div>
+                  <div style={{ fontSize:11, color:T.hint, marginTop:1, fontFamily:"monospace" }}>
+                    #{p.cod}
+                  </div>
+                </div>
+
+                {on && (
+                  <span style={{ fontSize:10, fontWeight:700, color:T.mint,
+                    letterSpacing:0.5, textTransform:"uppercase" }}>✓ meu</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding:"16px 24px", borderTop:`1px solid ${T.borderL}`,
+          display:"flex", alignItems:"center", justifyContent:"space-between",
+          background:"#FAFBFF" }}>
+          <span style={{ fontSize:12, color:T.sub }}>
+            {selecionados.size} produto{selecionados.size!==1?"s":""} na sua grade
+          </span>
+          <div style={{ display:"flex", gap:10 }}>
+            <button onClick={onClose}
+              style={{ padding:"9px 18px", fontSize:13, fontWeight:600, cursor:"pointer",
+                border:`1.5px solid ${T.borderL}`, borderRadius:10, background:T.surface,
+                color:T.sub }}>
+              Cancelar
+            </button>
+            <button onClick={salvar}
+              style={{ padding:"9px 22px", fontSize:13, fontWeight:700, cursor:"pointer",
+                border:"none", borderRadius:10, background:T.mint, color:T.navy,
+                boxShadow:`0 4px 14px rgba(0,201,167,0.35)` }}>
+              Salvar grade
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Animação de contagem (KPI counter) ──────────────────────────────────────
+function useCounter(target, duration = 900) {
+  const [val, setVal] = useState(0);
+  const prev = useRef(0);
+  useEffect(() => {
+    if (target === prev.current) return;
+    const start = prev.current;
+    const diff  = target - start;
+    const t0    = performance.now();
+    function tick(now) {
+      const p = Math.min((now - t0) / duration, 1);
+      const ease = 1 - Math.pow(1 - p, 3);
+      setVal(Math.round(start + diff * ease));
+      if (p < 1) requestAnimationFrame(tick);
+      else prev.current = target;
+    }
+    requestAnimationFrame(tick);
+  }, [target, duration]);
+  return val;
+}
+
+// ─── KPI card ────────────────────────────────────────────────────────────────
+function KpiCard({ label, value, accent, icon, sub }) {
+  const animated = useCounter(value);
+  return (
+    <div style={{
+      background: T.surface, borderRadius:16, padding:"20px 24px",
+      border:`1px solid ${T.borderL}`, flex:"1 1 150px",
+      borderTop:`3px solid ${accent}`, position:"relative", overflow:"hidden",
+    }}>
+      <div style={{ fontSize:11, fontWeight:600, color:T.sub, letterSpacing:1,
+        textTransform:"uppercase", marginBottom:10 }}>{label}</div>
+      <div style={{ fontSize:38, fontWeight:800, color:T.text, lineHeight:1,
+        fontVariantNumeric:"tabular-nums" }}>
+        {animated.toLocaleString("pt-BR")}
+      </div>
+      {sub && <div style={{ fontSize:12, color:accent, marginTop:6, fontWeight:500 }}>{sub}</div>}
+      <div style={{ position:"absolute", right:16, top:16, fontSize:22, opacity:0.12 }}>{icon}</div>
+    </div>
+  );
+}
+
+// ─── Badge ────────────────────────────────────────────────────────────────────
+const BADGES = {
+  Falta:   { bg:"#FEE2E2", color:"#991B1B", dot:"#EF4444" },
+  Regular: { bg:"#D1FAE5", color:"#065F46", dot:"#10B981" },
+  Excesso: { bg:"#FEF9C3", color:"#713F12", dot:"#EAB308" },
+};
+function Badge({ sit }) {
+  const s = BADGES[sit] ?? { bg:"#F1F5F9", color:"#475569", dot:"#94A3B8" };
+  return (
+    <span style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:11,
+      fontWeight:600, padding:"3px 9px", borderRadius:20,
+      background:s.bg, color:s.color, whiteSpace:"nowrap" }}>
+      <span style={{ width:6, height:6, borderRadius:"50%", background:s.dot, flexShrink:0 }}/>
+      {sit || "—"}
+    </span>
+  );
+}
+
+// ─── Mini sparkline SVG ───────────────────────────────────────────────────────
+function Spark({ values, color = T.mint }) {
+  const w=64, h=24, pad=2;
+  const max = Math.max(...values, 1);
+  const pts = values.map((v,i) => {
+    const x = pad + (i/(values.length-1||1)) * (w-pad*2);
+    const y = h - pad - (v/max)*(h-pad*2);
+    return `${x},${y}`;
+  }).join(" ");
+  return (
+    <svg width={w} height={h} style={{ display:"block" }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round"/>
+      {values.map((v,i) => {
+        const x = pad + (i/(values.length-1||1)) * (w-pad*2);
+        const y = h - pad - (v/max)*(h-pad*2);
+        return <circle key={i} cx={x} cy={y} r={i===values.length-1?3:0} fill={color}/>;
+      })}
+    </svg>
+  );
+}
+
+// ─── Gráfico de barras inline (produto) ──────────────────────────────────────
+function GraficoProduto({ produto, jun24, mai25, jun25, onClose }) {
+  const canvasRef = useRef(null);
+  const chartRef  = useRef(null);
+  const [ready, setReady] = useState(!!window.Chart);
+
+  useEffect(() => {
+    if (window.Chart) { setReady(true); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js";
+    s.onload = () => setReady(true);
+    document.head.appendChild(s);
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !canvasRef.current) return;
+    if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
+    chartRef.current = new window.Chart(canvasRef.current.getContext("2d"), {
+      type:"bar",
+      data:{
+        labels:["Jun/2024","Mai/2025","Jun/2025"],
+        datasets:[{
+          data:[jun24,mai25,jun25],
+          backgroundColor:["rgba(100,116,139,0.7)","rgba(255,217,61,0.85)","rgba(0,201,167,0.9)"],
+          borderColor:["#64748B","#D97706","#00C9A7"],
+          borderWidth:2, borderRadius:8,
+        }],
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ display:false },
+          tooltip:{ backgroundColor:"#0A0F1E", titleColor:"#fff", bodyColor:"#94A3B8",
+            padding:12, callbacks:{ label:c=>` ${c.parsed.y} unidades` } } },
+        scales:{
+          x:{ ticks:{ color:"#64748B", font:{ size:12, weight:"600" } }, grid:{ display:false } },
+          y:{ beginAtZero:true, ticks:{ color:"#94A3B8", font:{ size:11 } }, grid:{ color:"#F1F5F9" } },
+        },
+        animation:{ duration:600, easing:"easeOutQuart" },
+      },
+    });
+    return () => { if(chartRef.current){ chartRef.current.destroy(); chartRef.current=null; } };
+  }, [ready, jun24, mai25, jun25]);
+
+  const varAnual  = jun24===0 ? null : Math.round(((jun25-jun24)/jun24)*100);
+  const varMensal = mai25===0 ? null : Math.round(((jun25-mai25)/mai25)*100);
+
+  function chip(v) {
+    if (v===null) return <span style={{ color:T.hint }}>—</span>;
+    const up = v >= 0;
+    return <span style={{ fontWeight:700, color:up?"#059669":"#DC2626" }}>{up?"+":""}{v}%</span>;
+  }
+
+  return (
+    <tr>
+      <td colSpan={10} style={{ padding:0, background:"#F8FAFF",
+        borderBottom:`1px solid ${T.borderL}`, borderTop:`1px solid ${T.borderL}` }}>
+        <div style={{ display:"flex", gap:0, alignItems:"stretch" }}>
+          {/* Sidebar colorida */}
+          <div style={{ width:4, background:`linear-gradient(to bottom, ${T.mint}, ${T.petrol})`,
+            flexShrink:0, borderRadius:"0 0 0 0" }}/>
+
+          <div style={{ padding:"20px 24px", flex:1 }}>
+            {/* Header */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ width:8, height:8, borderRadius:"50%", background:T.mint }}/>
+                <span style={{ fontWeight:700, fontSize:14, color:T.text }}>{produto}</span>
+                <span style={{ fontSize:12, color:T.sub }}>Evolução de vendas</span>
+              </div>
+              <button onClick={onClose} style={{ background:"#EEF2FF", border:"none",
+                cursor:"pointer", color:T.sub, fontSize:13, padding:"4px 10px",
+                borderRadius:6, fontWeight:600 }}>fechar ×</button>
+            </div>
+
+            <div style={{ display:"flex", gap:16, alignItems:"flex-start", flexWrap:"wrap" }}>
+              {/* Cards de período */}
+              <div style={{ display:"flex", gap:10 }}>
+                {[
+                  { label:"Jun/2024", value:jun24, color:"#64748B", bg:"#F8FAFF" },
+                  { label:"Mai/2025", value:mai25, color:T.amber,   bg:"#FFFDE7" },
+                  { label:"Jun/2025", value:jun25, color:T.mint,    bg:"#F0FDF9" },
+                ].map(({ label, value, color, bg }) => (
+                  <div key={label} style={{ background:bg, border:`1px solid ${T.borderL}`,
+                    borderRadius:10, padding:"12px 16px", minWidth:110, textAlign:"center" }}>
+                    <div style={{ fontSize:10, fontWeight:600, color:T.sub,
+                      letterSpacing:0.8, textTransform:"uppercase", marginBottom:4 }}>{label}</div>
+                    <div style={{ fontSize:28, fontWeight:800, color, fontVariantNumeric:"tabular-nums" }}>
+                      {value}
+                    </div>
+                    <div style={{ fontSize:11, color:T.hint }}>unidades</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Variação */}
+              <div style={{ background:T.surface, border:`1px solid ${T.borderL}`, borderRadius:10,
+                padding:"12px 16px", minWidth:140 }}>
+                <div style={{ fontSize:10, fontWeight:600, color:T.sub,
+                  letterSpacing:0.8, textTransform:"uppercase", marginBottom:10 }}>Variação</div>
+                <div style={{ fontSize:13, marginBottom:6 }}>
+                  <span style={{ color:T.sub, fontSize:11 }}>vs Jun/2024 </span>{chip(varAnual)}
+                </div>
+                <div style={{ fontSize:13 }}>
+                  <span style={{ color:T.sub, fontSize:11 }}>vs Mai/2025 </span>{chip(varMensal)}
+                </div>
+              </div>
+
+              {/* Gráfico */}
+              <div style={{ flex:1, minWidth:240, height:160, position:"relative" }}>
+                <canvas ref={canvasRef} role="img"
+                  aria-label={`Vendas de ${produto}: Jun/2024=${jun24}, Mai/2025=${mai25}, Jun/2025=${jun25}`}>
+                  Vendas: {jun24}, {mai25}, {jun25}
+                </canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Dropdown multi-seleção ───────────────────────────────────────────────────
+function ProductSelect({ allProducts, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    function h(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  function toggle(p) { onChange(selected.includes(p)?selected.filter(x=>x!==p):[...selected,p]); }
+  const btnTxt = selected.length===0 ? "Todos os produtos" :
+    selected.length===1 ? selected[0] : `${selected.length} produtos`;
+  return (
+    <div ref={ref} style={{ position:"relative" }}>
+      <button onClick={()=>setOpen(o=>!o)} style={{
+        display:"flex", alignItems:"center", gap:8, padding:"8px 14px",
+        background:open||selected.length>0 ? T.navy : T.surface,
+        color:open||selected.length>0 ? "#fff" : T.text,
+        border:`1.5px solid ${open||selected.length>0 ? T.navy : T.borderL}`,
+        borderRadius:10, cursor:"pointer", fontSize:13, fontWeight:500,
+        transition:"all 0.15s", whiteSpace:"nowrap",
+      }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+        {btnTxt}
+        {selected.length > 0 && (
+          <span onClick={e=>{e.stopPropagation();onChange([]);}}
+            style={{ marginLeft:4, background:"rgba(255,255,255,0.2)", borderRadius:"50%",
+              width:18, height:18, display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:12, fontWeight:700, cursor:"pointer" }}>×</span>
+        )}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth={2.5}
+          style={{ transform:open?"rotate(180deg)":"rotate(0)", transition:"transform 0.2s", marginLeft:2 }}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      {open && (
+        <div style={{ position:"absolute", top:"calc(100% + 6px)", left:0,
+          background:T.surface, border:`1px solid ${T.borderL}`, borderRadius:12,
+          boxShadow:"0 8px 32px rgba(10,15,30,0.12)", zIndex:400,
+          maxHeight:300, overflowY:"auto", minWidth:280 }}>
+          {allProducts.map((p,i) => {
+            const on = selected.includes(p);
+            return (
+              <div key={p} onClick={()=>toggle(p)}
+                style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px",
+                  cursor:"pointer", fontSize:13,
+                  background:on?"#EEF2FF":T.surface, color:on?"#3730A3":T.text,
+                  borderBottom:i<allProducts.length-1?`1px solid ${T.borderL}`:"none" }}
+                onMouseEnter={e=>{if(!on)e.currentTarget.style.background="#F8FAFF";}}
+                onMouseLeave={e=>{e.currentTarget.style.background=on?"#EEF2FF":T.surface;}}>
+                <div style={{ width:16,height:16,borderRadius:4,flexShrink:0,
+                  background:on?T.navy:T.surface,
+                  border:`1.5px solid ${on?T.navy:T.borderL}`,
+                  display:"flex",alignItems:"center",justifyContent:"center" }}>
+                  {on&&<svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                    <polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2"
+                      strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+                <span style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{p}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Upload ───────────────────────────────────────────────────────────────────
+function UploadZone({ onData, compact }) {
+  const [drag, setDrag] = useState(false);
+  function parse(file) {
+    const r = new FileReader();
+    r.onload = e => {
+      const wb = XLSX.read(e.target.result, { type:"binary" });
+      onData(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:"" }), file.name);
+    };
+    r.readAsBinaryString(file);
+  }
+
+  if (compact) {
+    // Versão compacta para sidebar (trocar planilha)
+    return (
+      <label style={{ display:"inline-flex", alignItems:"center", gap:5,
+        fontSize:11, color:T.mint, cursor:"pointer", fontWeight:600 }}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+        </svg>
+        Trocar planilha
+        <input type="file" accept=".xlsx,.xls" style={{ display:"none" }}
+          onChange={e=>{if(e.target.files[0])parse(e.target.files[0]);}}/>
+      </label>
+    );
+  }
+
+  // Versão full para tela inicial
+  return (
+    <label
+      onDragOver={e=>{e.preventDefault();setDrag(true);}}
+      onDragLeave={()=>setDrag(false)}
+      onDrop={e=>{e.preventDefault();setDrag(false);if(e.dataTransfer.files[0])parse(e.dataTransfer.files[0]);}}
+      style={{ display:"flex", flexDirection:"column", alignItems:"center",
+        justifyContent:"center", gap:16, cursor:"pointer", textAlign:"center",
+        border:`2px dashed ${drag?T.mint:"rgba(255,255,255,0.15)"}`,
+        borderRadius:24, padding:"60px 40px",
+        background:drag?"rgba(0,201,167,0.06)":"rgba(255,255,255,0.03)",
+        transition:"all 0.2s", maxWidth:480, width:"100%" }}>
+      <div style={{ width:64, height:64, borderRadius:18,
+        background:drag?"rgba(0,201,167,0.18)":"rgba(255,255,255,0.07)",
+        display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.2s" }}>
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none"
+          stroke={drag?T.mint:"rgba(255,255,255,0.5)"} strokeWidth={1.8}
+          strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+        </svg>
+      </div>
+      <div>
+        <p style={{ color:"#fff", fontWeight:700, fontSize:16, margin:"0 0 6px" }}>
+          Arraste a planilha aqui
+        </p>
+        <p style={{ color:"rgba(255,255,255,0.4)", fontSize:13, margin:0 }}>
+          ou clique para selecionar · .xls ou .xlsx
+        </p>
+      </div>
+      <div style={{ display:"flex", gap:16, marginTop:4 }}>
+        {["Estoque em tempo real","Vendas por período","Comparativo de filiais"].map(f=>(
+          <span key={f} style={{ fontSize:11, color:"rgba(255,255,255,0.3)",
+            display:"flex", alignItems:"center", gap:4 }}>
+            <span style={{ color:T.mint }}>✓</span> {f}
+          </span>
+        ))}
+      </div>
+      <input type="file" accept=".xlsx,.xls" style={{ display:"none" }}
+        onChange={e=>{if(e.target.files[0])parse(e.target.files[0]);}}/>
+    </label>
+  );
+}
+
+// ─── Dropdown de filial (dark, com busca + multi-check) ───────────────────────
+function FilialDropdown({ filiais, selected, onChange, titulo="Filial" }) {
+  const [open, setOpen] = useState(false);
+  const [busca, setBusca] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function h(e) { if(ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  const filtradas = busca.trim()
+    ? filiais.filter(f=>f.toUpperCase().includes(busca.toUpperCase()))
+    : filiais;
+
+  function toggle(f) {
+    onChange(selected.includes(f) ? selected.filter(x=>x!==f) : [...selected, f]);
+  }
+  function toggleAll() {
+    const allOn = filtradas.every(f=>selected.includes(f));
+    const rest = selected.filter(f=>!filtradas.includes(f));
+    onChange(allOn ? rest : [...new Set([...selected, ...filtradas])]);
+  }
+
+  const btnLabel = selected.length===0
+    ? `Todas as ${titulo.toLowerCase()}s`
+    : selected.length===1 ? selected[0]
+    : `${selected.length} ${titulo.toLowerCase()}s`;
+
+  return (
+    <div ref={ref} style={{ marginBottom:14 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+        <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", fontWeight:600,
+          letterSpacing:0.8, textTransform:"uppercase" }}>{titulo}</div>
+        {selected.length>0 && (
+          <button onClick={()=>onChange([])}
+            style={{ background:"none", border:"none", cursor:"pointer",
+              fontSize:10, color:"rgba(255,255,255,0.3)", padding:0, fontWeight:600 }}>
+            limpar
+          </button>
+        )}
+      </div>
+
+      {/* Trigger */}
+      <button onClick={()=>setOpen(o=>!o)}
+        style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between",
+          padding:"8px 10px", borderRadius:8, border:"none", cursor:"pointer", textAlign:"left",
+          background: open||selected.length>0 ? "rgba(99,102,241,0.2)" : "rgba(255,255,255,0.06)",
+          outline: open||selected.length>0 ? "1px solid rgba(99,102,241,0.5)" : "1px solid transparent",
+          color: selected.length>0 ? "#A5B4FC" : "rgba(255,255,255,0.5)",
+          fontSize:12, fontWeight:selected.length>0?600:400, transition:"all 0.15s" }}>
+        <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+          flex:1, textAlign:"left" }}>{btnLabel}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth={2.5}
+          style={{ transform:open?"rotate(180deg)":"rotate(0)", transition:"transform 0.2s", flexShrink:0, marginLeft:6 }}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div style={{ marginTop:4, background:"#0F1629", border:"1px solid rgba(255,255,255,0.1)",
+          borderRadius:10, overflow:"hidden", boxShadow:"0 8px 24px rgba(0,0,0,0.4)" }}>
+          {/* Busca */}
+          <div style={{ padding:"8px 10px", borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+            <input value={busca} onChange={e=>setBusca(e.target.value)}
+              placeholder="Buscar filial..."
+              style={{ width:"100%", padding:"5px 8px", fontSize:11,
+                background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)",
+                borderRadius:6, color:"rgba(255,255,255,0.8)", outline:"none",
+                boxSizing:"border-box" }}/>
+          </div>
+          {/* Marcar todas visíveis */}
+          {filtradas.length > 1 && (
+            <button onClick={toggleAll}
+              style={{ width:"100%", padding:"6px 10px", fontSize:11, fontWeight:600,
+                background:"transparent", border:"none", cursor:"pointer", textAlign:"left",
+                color:"rgba(255,255,255,0.35)", borderBottom:"1px solid rgba(255,255,255,0.06)",
+                transition:"color 0.15s" }}
+              onMouseEnter={e=>e.currentTarget.style.color="rgba(255,255,255,0.7)"}
+              onMouseLeave={e=>e.currentTarget.style.color="rgba(255,255,255,0.35)"}>
+              {filtradas.every(f=>selected.includes(f)) ? "Desmarcar todas" : "Marcar todas"}
+            </button>
+          )}
+          {/* Lista */}
+          <div style={{ maxHeight:200, overflowY:"auto" }}>
+            {filtradas.map((f,i) => {
+              const on = selected.includes(f);
+              return (
+                <div key={f} onClick={()=>toggle(f)}
+                  style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 10px",
+                    cursor:"pointer", fontSize:11, transition:"background 0.1s",
+                    background:on?"rgba(99,102,241,0.15)":"transparent",
+                    borderBottom:i<filtradas.length-1?"1px solid rgba(255,255,255,0.04)":"none" }}
+                  onMouseEnter={e=>{ if(!on) e.currentTarget.style.background="rgba(255,255,255,0.05)"; }}
+                  onMouseLeave={e=>{ e.currentTarget.style.background=on?"rgba(99,102,241,0.15)":"transparent"; }}>
+                  <div style={{ width:14, height:14, borderRadius:3, flexShrink:0,
+                    background:on?"#818CF8":"transparent",
+                    border:`1.5px solid ${on?"#818CF8":"rgba(255,255,255,0.2)"}`,
+                    display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {on && <svg width="8" height="8" viewBox="0 0 12 12" fill="none">
+                      <polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2.2"
+                        strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>}
+                  </div>
+                  <span style={{ color:on?"#C7D2FE":"rgba(255,255,255,0.5)",
+                    fontWeight:on?600:400, overflow:"hidden", textOverflow:"ellipsis",
+                    whiteSpace:"nowrap", flex:1 }}>{f}</span>
+                </div>
+              );
+            })}
+            {filtradas.length===0 && (
+              <div style={{ padding:"12px 10px", fontSize:11, color:"rgba(255,255,255,0.3)",
+                textAlign:"center" }}>Nenhuma filial encontrada</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Bloco filial ─────────────────────────────────────────────────────────────
+function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSituacaoChange }) {
+  const [aberto, setAberto] = useState(true);
+
+  // situacaoFiltro é um array vindo do estado global (sitF)
+  const sitAtiva = Array.isArray(situacaoFiltro) ? situacaoFiltro : (situacaoFiltro ? [situacaoFiltro] : []);
+
+  function toggleSit(e, sit) {
+    e.stopPropagation();
+    if (!aberto) setAberto(true);
+    // Alterna no filtro global — aplica a todos os blocos
+    const next = sitAtiva.includes(sit)
+      ? sitAtiva.filter(s => s !== sit)
+      : [...sitAtiva, sit];
+    onSituacaoChange(next);
+  }
+
+  const base = useMemo(() => {
+    let r = sitAtiva.length > 0 ? itens.filter(i => sitAtiva.includes(i.situacao)) : itens;
+    if (produtosSelecionados.length > 0) r = r.filter(i => produtosSelecionados.includes(i.produto));
+    return r;
+  }, [itens, situacaoFiltro, produtosSelecionados]);
+
+  const cF = itens.filter(r=>r.situacao==="Falta").length;
+  const cE = itens.filter(r=>r.situacao==="Excesso").length;
+  const cR = itens.filter(r=>r.situacao==="Regular").length;
+  const totalVendas = base.reduce((a,r)=>a+r.vendasJun,0);
+  if (base.length===0 && sitAtiva.length===0) return null;
+  if (base.length===0) return null;
+
+  function pill(sit, count, bg, color, dot) {
+    if (count===0) return null;
+    const on = sitAtiva.includes(sit);
+    return (
+      <span onClick={e=>toggleSit(e,sit)}
+        style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:11, fontWeight:600,
+          padding:"3px 10px", borderRadius:20, cursor:"pointer", userSelect:"none", transition:"all 0.15s",
+          background:on?dot:bg, color:on?"#fff":color,
+          border:`1.5px solid ${on?dot:"transparent"}` }}>
+        <span style={{ width:6,height:6,borderRadius:"50%",background:on?"rgba(255,255,255,0.7)":dot,flexShrink:0 }}/>
+        {count} {sit.toLowerCase()}{count!==1?"s":""}
+      </span>
+    );
+  }
+
+  return (
+    <div style={{ border:`1px solid ${sitAtiva.length>0?"#818CF8":T.borderL}`, borderRadius:14,
+      overflow:"hidden", marginBottom:10, transition:"border-color 0.2s",
+      boxShadow:"0 1px 4px rgba(10,15,30,0.05)" }}>
+      <div onClick={()=>setAberto(v=>!v)}
+        style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+          padding:"12px 18px", background:T.snow, cursor:"pointer",
+          borderBottom:aberto?`1px solid ${T.borderL}`:"none" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <div style={{ width:32, height:32, borderRadius:8, background:T.navy,
+            display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.mint}
+              strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+              <polyline points="9 22 9 12 15 12 15 22"/>
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontWeight:700, fontSize:13, color:T.text }}>{filial}</div>
+            <div style={{ fontSize:11, color:T.sub }}>
+              {base.length} produto{base.length!==1?"s":""}
+              {sitAtiva.length>0 && (
+                <span onClick={e=>{e.stopPropagation();onSituacaoChange([]);}}
+                  style={{ color:"#6366F1", marginLeft:8, cursor:"pointer", fontWeight:600 }}>
+                  ver todos
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          {pill("Falta",   cF, "#FEE2E2", "#991B1B", "#EF4444")}
+          {pill("Excesso", cE, "#FEF9C3", "#713F12", "#EAB308")}
+          {pill("Regular", cR, "#D1FAE5", "#065F46", "#10B981")}
+          <span style={{ fontSize:12, color:T.sub, marginLeft:4 }}>
+            {totalVendas} vend.
+          </span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.hint}
+            strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+            style={{ transform:aberto?"rotate(180deg)":"rotate(0)", transition:"transform 0.2s" }}>
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+      {aberto && (
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+            <thead>
+              <tr style={{ background:"#FAFBFF" }}>
+                {["Código","Produto","Estoque","Situação","Vend. Jun/24","Vend. Mai/25","Média Trim.","Preço"].map(h=>(
+                  <th key={h} style={{ padding:"8px 14px", textAlign:"left", fontWeight:600,
+                    fontSize:11, color:T.sub, borderBottom:`1px solid ${T.borderL}`,
+                    whiteSpace:"nowrap", letterSpacing:0.4, textTransform:"uppercase" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {base.map((r,i)=>(
+                <tr key={i} style={{ borderBottom:`1px solid ${T.borderL}` }}
+                  onMouseEnter={e=>e.currentTarget.style.background="#F8FAFF"}
+                  onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <td style={{ padding:"9px 14px", color:T.sub, whiteSpace:"nowrap",
+                    fontSize:11, fontFamily:"monospace" }}>{r.codProduto}</td>
+                  <td style={{ padding:"9px 14px", fontWeight:600, maxWidth:200,
+                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={r.produto}>{r.produto}</td>
+                  <td style={{ padding:"9px 14px", textAlign:"center", fontWeight:800,
+                    color:r.estoque===0?T.coral:T.text }}>{r.estoque}</td>
+                  <td style={{ padding:"9px 14px" }}><Badge sit={r.situacao}/></td>
+                  <td style={{ padding:"9px 14px", textAlign:"center", color:T.sub }}>{r.vendasJun}</td>
+                  <td style={{ padding:"9px 14px", textAlign:"center", color:T.sub }}>{r.vendasMai}</td>
+                  <td style={{ padding:"9px 14px", textAlign:"center", color:T.sub }}>{r.mediaTrim}</td>
+                  <td style={{ padding:"9px 14px", whiteSpace:"nowrap", fontWeight:600 }}>
+                    {r.preco.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Filtro multi-seleção para sidebar dark ───────────────────────────────────
+function MultiCheckFilter({ label, options, selected, onChange, colorMap }) {
+  function toggle(val) {
+    onChange(selected.includes(val) ? selected.filter(v=>v!==val) : [...selected, val]);
+  }
+  return (
+    <div style={{ marginBottom:14 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+        marginBottom:6 }}>
+        <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", fontWeight:600,
+          letterSpacing:0.8, textTransform:"uppercase" }}>{label}</div>
+        {selected.length > 0 && (
+          <button onClick={()=>onChange([])}
+            style={{ background:"none", border:"none", cursor:"pointer",
+              fontSize:10, color:"rgba(255,255,255,0.3)", padding:0,
+              fontWeight:600, letterSpacing:0.5 }}>
+            limpar
+          </button>
+        )}
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+        {options.map(opt => {
+          const on = selected.includes(opt.value);
+          const dot = colorMap?.[opt.value];
+          return (
+            <button key={opt.value} onClick={()=>toggle(opt.value)}
+              style={{ display:"flex", alignItems:"center", gap:9, width:"100%",
+                padding:"7px 10px", borderRadius:8, border:"none", cursor:"pointer",
+                textAlign:"left", transition:"all 0.15s",
+                background: on ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.03)",
+                outline: on ? "1px solid rgba(255,255,255,0.15)" : "1px solid transparent",
+              }}>
+              {/* Checkbox */}
+              <div style={{ width:15, height:15, borderRadius:4, flexShrink:0,
+                background: on ? (dot||T.mint) : "transparent",
+                border: `1.5px solid ${on ? (dot||T.mint) : "rgba(255,255,255,0.2)"}`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                transition:"all 0.15s" }}>
+                {on && <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
+                  <polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2.2"
+                    strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>}
+              </div>
+              {/* Dot indicador de cor */}
+              {dot && <span style={{ width:7, height:7, borderRadius:"50%",
+                background:dot, flexShrink:0, opacity:on?1:0.4 }}/>}
+              <span style={{ fontSize:12, color: on ? "#fff" : "rgba(255,255,255,0.5)",
+                fontWeight: on ? 600 : 400, flex:1, overflow:"hidden",
+                textOverflow:"ellipsis", whiteSpace:"nowrap", transition:"color 0.15s" }}>
+                {opt.label}
+              </span>
+              {on && <span style={{ fontSize:10, color:dot||T.mint, fontWeight:700 }}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+function App() {
+  const [rows, setRows]   = useState([]);
+  const [fileName, setFileName] = useState("");
+  const [aba, setAba]     = useState("produto");
+  const [prodSel, setProdSel] = useState([]);
+  const [filialF, setFilialF] = useState([]);   // multi
+  const [sitF, setSitF]       = useState([]);   // multi
+  const [cidadeF, setCidadeF] = useState([]);   // multi
+  const [meus, setMeus]   = useState(true);
+  const [sortCol, setSortCol] = useState("produto");
+  const [sortDir, setSortDir] = useState("asc");
+  const [prodAberto, setProdAberto] = useState(null);
+  const [meusCodigos, setMeusCodigos] = useState(loadSavedCodigos);
+  const [configAberto, setConfigAberto] = useState(false);
+
+  function handleSort(col) {
+    if (sortCol===col) setSortDir(d=>d==="asc"?"desc":"asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  }
+
+  const handleData = useCallback((json, name) => {
+    const mapped = json.map(r => ({
+      // Campos de identificação da filial
+      codFilial:   r["Cod. Filial"]??"",
+      filial:      String(r["Filial"]||""),
+      endereco:    String(r["Endereço"]||r["Endereco"]||""),
+      numero:      r["Número"]??r["Numero"]??"",
+      bairro:      String(r["Bairro"]||""),
+      cep:         String(r["CEP"]||""),
+      cidade:      String(r["Cidade"]||""),
+      uf:          String(r["UF"]||""),
+      // Campos do produto
+      codProduto:  r["Cod. Produto"]??"",
+      produto:     String(r["Produto"]||""),
+      linha:       String(r["Linha"]||""),
+      preco:       Number(r["Preço"]||r["Preco"]||0),
+      estoque:     Number(r["Estoque"]||0),
+      situacao:    String(r["Situação Estoque"]||r["Situacao Estoque"]||""),
+      // Campos de vendas
+      vendasJun:   Number(r["Vendas Jun."]||0),
+      vendasMai:   Number(r["Vendas Mai."]||0),
+      vendasJun25: Number(r["Vendas Jun/2025"]||0),
+      mediaTrim:   Number(r["Venda média Trim. fechado"]||0),
+      // Percentuais
+      pctMai:      Number(r["% Vendas Mai."]||0),
+      pctJun25:    Number(r["% Vendas Jun/2025"]||0),
+      pctTrim:     Number(r["% Venda média Trim. fechado"]||0),
+    }));
+    setRows(mapped);
+    setFileName(name||"");
+    setProdSel([]); setFilialF([]); setSitF([]); setCidadeF([]); setProdAberto(null);
+  }, []);
+
+  function handleFileInput(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const wb = XLSX.read(ev.target.result, { type:"binary" });
+      handleData(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:"" }), file.name);
+    };
+    reader.readAsBinaryString(file);
+  }
+
+  const filiais = useMemo(() =>
+    [...new Set(rows.map(r=>r.filial).filter(Boolean))].sort(), [rows]);
+
+  const cidades = useMemo(() =>
+    [...new Set(rows.map(r=>r.cidade).filter(Boolean))].sort(), [rows]);
+
+  const allProducts = useMemo(() => {
+    const base = meus ? rows.filter(r=>meusCodigos.has(Number(r.codProduto))) : rows;
+    return [...new Set(base.map(r=>r.produto).filter(Boolean))].sort();
+  }, [rows, meus, meusCodigos]);
+
+  // Agrupado por produto — agrupa PRIMEIRO, filtra situação DEPOIS do total
+  const porProduto = useMemo(() => {
+    // 1. Filtra apenas por "meus produtos" e seleção de produto (não por situação ainda)
+    const base = rows.filter(r => {
+      if (meus && !meusCodigos.has(Number(r.codProduto))) return false;
+      if (prodSel.length>0 && !prodSel.includes(r.produto)) return false;
+      if (cidadeF.length>0 && !cidadeF.includes(r.cidade)) return false;
+      return true;
+    });
+
+    // 2. Agrupa e soma todas as filiais
+    const map = new Map();
+    base.forEach(r => {
+      if (!map.has(r.produto)) map.set(r.produto, { codProduto:r.codProduto,
+        produto:r.produto, linha:r.linha, preco:r.preco,
+        estoque:0, vendasJun:0, vendasMai:0, vendasJun25:0, mediaTrim:0 });
+      const g = map.get(r.produto);
+      g.estoque    += r.estoque;
+      g.vendasJun  += r.vendasJun;
+      g.vendasMai  += r.vendasMai;
+      g.vendasJun25+= r.vendasJun25;
+      g.mediaTrim  += r.mediaTrim;
+    });
+
+    // 3. Calcula situação consolidada sobre o estoque TOTAL
+    const SO = { Falta:0, Excesso:1, Regular:2 };
+    let items = [...map.values()].map(g => ({
+      ...g,
+      situacaoConsolidada: g.estoque < 20 ? "Falta" : g.estoque <= 100 ? "Regular" : "Excesso",
+    }));
+
+    // 4. Agora sim filtra por situação (sobre o total consolidado)
+    if (sitF.length > 0) {
+      items = items.filter(g => sitF.includes(g.situacaoConsolidada));
+    }
+
+    // 5. Ordena
+    items.sort((a,b) => {
+      let va,vb;
+      if (sortCol==="codProduto") { va=Number(a.codProduto); vb=Number(b.codProduto); }
+      else if (sortCol==="produto")  return sortDir==="asc"?a.produto.localeCompare(b.produto):b.produto.localeCompare(a.produto);
+      else if (sortCol==="linha")    return sortDir==="asc"?a.linha.localeCompare(b.linha):b.linha.localeCompare(a.linha);
+      else if (sortCol==="situacao") { va=SO[a.situacaoConsolidada]??9; vb=SO[b.situacaoConsolidada]??9; }
+      else { const k=sortCol; va=a[k]??0; vb=b[k]??0; }
+      return sortDir==="asc"?va-vb:vb-va;
+    });
+
+    return items;
+  }, [rows, meus, meusCodigos, prodSel, sitF, cidadeF, sortCol, sortDir]);
+
+  const porFilial = useMemo(() => {
+    const base = rows.filter(r => {
+      if (meus && !meusCodigos.has(Number(r.codProduto))) return false;
+      if (cidadeF.length>0 && !cidadeF.includes(r.cidade)) return false;
+      return true;
+    });
+    const map = new Map();
+    base.forEach(r=>{ if(!map.has(r.filial)) map.set(r.filial,[]); map.get(r.filial).push(r); });
+    return [...map.entries()]
+      .filter(([nome]) => filialF.length===0 || filialF.includes(nome))
+      .sort((a,b)=>a[0].localeCompare(b[0]));
+  }, [rows, meus, meusCodigos, filialF, cidadeF]);
+
+  const metrics = useMemo(()=>({
+    prods:     porProduto.length,
+    estoque:   porProduto.reduce((a,r)=>a+r.estoque,0),
+    vendasJun: porProduto.reduce((a,r)=>a+r.vendasJun25,0),
+    faltas:    porProduto.filter(r=>r.situacaoConsolidada==="Falta").length,
+  }),[porProduto]);
+
+  const COLS = [
+    { label:"Código",        col:"codProduto" },
+    { label:"Produto",       col:"produto" },
+    { label:"Linha",         col:"linha" },
+    { label:"Preço",         col:"preco" },
+    { label:"Estoque",       col:"estoque" },
+    { label:"Situação",      col:"situacao" },
+    { label:"Jun/2024",      col:"vendasJun" },
+    { label:"Mai/2025",      col:"vendasMai" },
+    { label:"Jun/2025",      col:"vendasJun25" },
+    { label:"Média Trim.",   col:"mediaTrim" },
+  ];
+
+  if (rows.length===0) {
+    // Tela inicial: layout completo com sidebar + zona de upload no centro
+    return (
+      <div style={{ display:"flex", minHeight:"100vh", background:T.navy,
+        fontFamily:"'Inter','Segoe UI',sans-serif" }}>
+
+        {/* Sidebar inicial */}
+        <aside style={{ width:220, background:"rgba(255,255,255,0.03)",
+          borderRight:"1px solid rgba(255,255,255,0.06)",
+          display:"flex", flexDirection:"column",
+          position:"fixed", top:0, left:0, bottom:0 }}>
+          <div style={{ padding:"28px 20px" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ width:36, height:36, borderRadius:10, background:T.mint,
+                display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                  stroke={T.navy} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontSize:13, fontWeight:800, color:"#fff" }}>Representante</div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)", marginTop:2 }}>Painel de vendas</div>
+              </div>
+            </div>
+          </div>
+          <div style={{ flex:1, padding:"0 20px" }}>
+            <div style={{ fontSize:11, color:"rgba(255,255,255,0.2)", lineHeight:1.6 }}>
+              Faça o upload da planilha para acessar o painel completo com estoque, vendas e análises por filial.
+            </div>
+            <div style={{ marginTop:24, display:"flex", flexDirection:"column", gap:10 }}>
+              {["Estoque consolidado","Vendas por período","Filtros por filial","Gráficos de tendência"].map(f=>(
+                <div key={f} style={{ display:"flex", alignItems:"center", gap:8,
+                  fontSize:12, color:"rgba(255,255,255,0.25)" }}>
+                  <span style={{ color:T.mint, fontSize:14 }}>✓</span>{f}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ padding:"20px", borderTop:"1px solid rgba(255,255,255,0.06)",
+            fontSize:11, color:"rgba(255,255,255,0.2)" }}>
+            Os dados ficam apenas no seu navegador
+          </div>
+        </aside>
+
+        {/* Área central de upload */}
+        <div style={{ marginLeft:220, flex:1, display:"flex", flexDirection:"column",
+          alignItems:"center", justifyContent:"center", padding:40 }}>
+          <div style={{ textAlign:"center", marginBottom:40 }}>
+            <h1 style={{ color:"#fff", fontSize:32, fontWeight:800, margin:"0 0 10px",
+              letterSpacing:-0.8 }}>
+              Bem-vindo ao seu painel
+            </h1>
+            <p style={{ color:"rgba(255,255,255,0.4)", fontSize:15, margin:0 }}>
+              Carregue a planilha da rede para começar
+            </p>
+          </div>
+          <UploadZone onData={handleData}/>
+          <p style={{ color:"rgba(255,255,255,0.2)", fontSize:12, marginTop:24 }}>
+            Compatível com .xls e .xlsx · Dados processados localmente
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const NAVS = [
+    { id:"produto", icon:"▦", label:"Por produto" },
+    { id:"filial",  icon:"⌂", label:"Por filial" },
+  ];
+
+  return (
+    <div style={{ display:"flex", minHeight:"100vh", background:T.snow,
+      fontFamily:"'Inter','Segoe UI',sans-serif", color:T.text }}>
+
+      {/* Modal de configuração */}
+      {configAberto && (
+        <SettingsModal
+          allRows={rows}
+          meusCodigos={meusCodigos}
+          onSave={novos => setMeusCodigos(novos)}
+          onClose={() => setConfigAberto(false)}
+        />
+      )}
+
+      {/* ── Sidebar ── */}
+      <aside style={{ width:220, background:T.navy, display:"flex", flexDirection:"column",
+        position:"fixed", top:0, left:0, bottom:0, zIndex:200 }}>
+        {/* Logo */}
+        <div style={{ padding:"24px 20px 20px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:4 }}>
+            <div style={{ width:32, height:32, borderRadius:8, background:T.mint,
+              display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke={T.navy} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize:13, fontWeight:800, color:"#fff", lineHeight:1 }}>Representante</div>
+              <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", marginTop:2 }}>Painel de vendas</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Arquivo */}
+        <div style={{ margin:"0 12px", borderRadius:10, background:"rgba(255,255,255,0.06)",
+          padding:"10px 12px" }}>
+          <div style={{ fontSize:10, color:T.mint, fontWeight:700, letterSpacing:0.8,
+            textTransform:"uppercase", marginBottom:4 }}>Arquivo carregado</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", wordBreak:"break-all",
+            lineHeight:1.4 }}>{fileName}</div>
+          <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)", marginTop:4 }}>
+            {rows.length.toLocaleString("pt-BR")} linhas
+          </div>
+          <UploadZone onData={handleData} compact/>
+        </div>
+
+        {/* Navegação */}
+        <nav style={{ padding:"20px 12px", flex:1 }}>
+          <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", fontWeight:600,
+            letterSpacing:1, textTransform:"uppercase", marginBottom:8, paddingLeft:8 }}>
+            Visualização
+          </div>
+          {NAVS.map(({ id, label }) => (
+            <button key={id} onClick={()=>setAba(id)}
+              style={{ display:"flex", alignItems:"center", gap:10, width:"100%",
+                padding:"9px 12px", borderRadius:10, border:"none", cursor:"pointer",
+                background:aba===id?"rgba(0,201,167,0.12)":"transparent",
+                color:aba===id?T.mint:"rgba(255,255,255,0.55)",
+                fontSize:13, fontWeight:aba===id?700:400,
+                transition:"all 0.15s", textAlign:"left", marginBottom:2 }}>
+              <span style={{ width:3, height:16, borderRadius:2,
+                background:aba===id?T.mint:"transparent", flexShrink:0 }}/>
+              {label}
+            </button>
+          ))}
+
+          {/* Engrenagem — configuração da grade */}
+          <div style={{ marginTop:20, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:16 }}>
+            <button onClick={()=>setConfigAberto(true)}
+              style={{ display:"flex", alignItems:"center", gap:10, width:"100%",
+                padding:"9px 12px", borderRadius:10, border:"none", cursor:"pointer",
+                background:"transparent", color:"rgba(255,255,255,0.4)",
+                fontSize:13, fontWeight:400, transition:"all 0.2s", textAlign:"left" }}
+              onMouseEnter={e=>{ e.currentTarget.style.background="rgba(255,255,255,0.06)"; e.currentTarget.style.color="rgba(255,255,255,0.85)"; }}
+              onMouseLeave={e=>{ e.currentTarget.style.background="transparent"; e.currentTarget.style.color="rgba(255,255,255,0.4)"; }}>
+              {/* SVG engrenagem */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+                style={{ flexShrink:0 }}>
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+              </svg>
+              <div>
+                <div style={{ lineHeight:1.2 }}>Minha grade</div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.25)", marginTop:2 }}>
+                  {meusCodigos.size} produto{meusCodigos.size!==1?"s":""}
+                </div>
+              </div>
+            </button>
+          </div>
+        </nav>
+
+        {/* Filtros na sidebar */}
+        <div style={{ padding:"12px 12px 20px", borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+            marginBottom:12 }}>
+            <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", fontWeight:600,
+              letterSpacing:1, textTransform:"uppercase" }}>Filtros</div>
+            {(filialF.length>0 || sitF.length>0 || cidadeF.length>0) && (
+              <button onClick={()=>{ setFilialF([]); setSitF([]); setCidadeF([]); }}
+                style={{ background:"none", border:"none", cursor:"pointer",
+                  fontSize:10, color:T.coral, fontWeight:700, padding:0 }}>
+                limpar tudo
+              </button>
+            )}
+          </div>
+
+          {/* Toggle meus/todos */}
+          <button onClick={()=>setMeus(m=>!m)}
+            style={{ width:"100%", padding:"8px 12px", borderRadius:8, border:"none",
+              cursor:"pointer", fontSize:12, fontWeight:600, marginBottom:14,
+              background:meus?"rgba(0,201,167,0.15)":"rgba(255,255,255,0.06)",
+              color:meus?T.mint:"rgba(255,255,255,0.5)", textAlign:"left",
+              transition:"all 0.15s" }}>
+            {meus ? "✓ Meus produtos" : "Todos os produtos"}
+          </button>
+
+          {/* Filtro de cidade */}
+          <FilialDropdown
+            filiais={cidades}
+            selected={cidadeF}
+            onChange={setCidadeF}
+            titulo="Cidade"
+          />
+
+          {/* Filtro de filial */}
+          <FilialDropdown
+            filiais={filiais}
+            selected={filialF}
+            onChange={setFilialF}
+            titulo="Filtro por cidade"
+          />
+
+          {/* Filtro de situação */}
+          <MultiCheckFilter
+            label="Situação"
+            options={[
+              { value:"Falta",   label:"Falta" },
+              { value:"Regular", label:"Regular" },
+              { value:"Excesso", label:"Excesso" },
+            ]}
+            selected={sitF}
+            onChange={setSitF}
+            colorMap={{ Falta:"#EF4444", Regular:"#10B981", Excesso:"#EAB308" }}
+          />
+        </div>
+      </aside>
+
+      {/* ── Conteúdo ── */}
+      <div style={{ marginLeft:220, flex:1, display:"flex", flexDirection:"column",
+        minWidth:0 }}>
+
+        {/* Topbar */}
+        <header style={{ background:T.surface, borderBottom:`1px solid ${T.borderL}`,
+          padding:"0 28px", height:56, display:"flex", alignItems:"center",
+          justifyContent:"space-between", position:"sticky", top:0, zIndex:100,
+          boxShadow:"0 1px 0 rgba(10,15,30,0.06)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", flex:1, minWidth:0 }}>
+            <span style={{ fontSize:15, fontWeight:700, color:T.text, flexShrink:0 }}>
+              {aba==="produto" ? "Por produto" : "Por filial"}
+            </span>
+            <span style={{ fontSize:12, color:T.sub, flexShrink:0 }}>
+              {aba==="produto"
+                ? `${porProduto.length} produto${porProduto.length!==1?"s":""}`
+                : `${porFilial.length} filial${porFilial.length!==1?"is":""}`}
+            </span>
+            {/* Chips de filtros ativos */}
+            {cidadeF.map(c=>(
+              <span key={c} style={{ display:"inline-flex", alignItems:"center", gap:4,
+                fontSize:11, fontWeight:600, padding:"2px 8px", borderRadius:20,
+                background:"#F0FDF9", color:"#065F46", flexShrink:0 }}>
+                {c}
+                <button onClick={()=>setCidadeF(prev=>prev.filter(x=>x!==c))}
+                  style={{ background:"none", border:"none", cursor:"pointer",
+                    color:"#059669", fontSize:13, lineHeight:1, padding:0 }}>×</button>
+              </span>
+            ))}
+            {filialF.map(f=>(
+              <span key={f} style={{ display:"inline-flex", alignItems:"center", gap:4,
+                fontSize:11, fontWeight:600, padding:"2px 8px", borderRadius:20,
+                background:"#EEF2FF", color:"#4338CA", flexShrink:0 }}>
+                {f}
+                <button onClick={()=>setFilialF(prev=>prev.filter(x=>x!==f))}
+                  style={{ background:"none", border:"none", cursor:"pointer",
+                    color:"#6366F1", fontSize:13, lineHeight:1, padding:0 }}>×</button>
+              </span>
+            ))}
+            {sitF.map(s=>{
+              const cor = { Falta:"#EF4444", Regular:"#10B981", Excesso:"#EAB308" }[s]||T.sub;
+              return (
+                <span key={s} style={{ display:"inline-flex", alignItems:"center", gap:4,
+                  fontSize:11, fontWeight:600, padding:"2px 8px", borderRadius:20,
+                  background:`${cor}18`, color:cor, flexShrink:0 }}>
+                  {s}
+                  <button onClick={()=>setSitF(prev=>prev.filter(x=>x!==s))}
+                    style={{ background:"none", border:"none", cursor:"pointer",
+                      color:cor, fontSize:13, lineHeight:1, padding:0 }}>×</button>
+                </span>
+              );
+            })}
+          </div>
+          <ProductSelect allProducts={allProducts} selected={prodSel} onChange={setProdSel}/>
+        </header>
+
+        <div style={{ padding:"24px 28px", flex:1 }}>
+          {/* KPIs */}
+          <div style={{ display:"flex", gap:14, marginBottom:24, flexWrap:"wrap" }}>
+            <KpiCard label="Produtos" value={metrics.prods} accent={T.mint} icon="◈"
+              sub={meus?"meus produtos":"total"}/>
+            <KpiCard label="Estoque total" value={metrics.estoque} accent="#6366F1" icon="◫"
+              sub="todas as filiais"/>
+            <KpiCard label="Vendas jun/2025" value={metrics.vendasJun} accent={T.amber} icon="◆"
+              sub="unidades vendidas"/>
+            <KpiCard label="Produtos em falta" value={metrics.faltas} accent={T.coral} icon="◉"
+              sub={metrics.faltas>0 ? "requer atenção" : "sem ocorrências"}/>
+          </div>
+
+          {/* ── Aba: Por produto ── */}
+          {aba==="produto" && (
+            <div style={{ background:T.surface, borderRadius:16,
+              border:`1px solid ${T.borderL}`, overflow:"hidden",
+              boxShadow:"0 2px 12px rgba(10,15,30,0.06)" }}>
+              <div style={{ padding:"12px 18px", borderBottom:`1px solid ${T.borderL}`,
+                display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <span style={{ fontSize:12, fontWeight:600, color:T.sub,
+                  textTransform:"uppercase", letterSpacing:0.6 }}>
+                  {porProduto.length} produto{porProduto.length!==1?"s":""}
+                </span>
+                <span style={{ fontSize:11, color:T.hint }}>
+                  Clique no código ou produto para ver o gráfico
+                </span>
+              </div>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+                  <thead>
+                    <tr style={{ background:"#F8FAFF" }}>
+                      {COLS.map(({ label, col }) => {
+                        const active = sortCol===col;
+                        return (
+                          <th key={col} onClick={()=>handleSort(col)}
+                            style={{ padding:"10px 14px", textAlign:"left", fontWeight:700,
+                              fontSize:10, letterSpacing:0.8, textTransform:"uppercase",
+                              color:active?T.petrol:T.hint,
+                              borderBottom:`1px solid ${T.borderL}`, whiteSpace:"nowrap",
+                              cursor:"pointer", userSelect:"none",
+                              background:active?"#EEF2FF":"#F8FAFF",
+                              transition:"background 0.1s, color 0.1s" }}>
+                            <span style={{ display:"inline-flex", alignItems:"center", gap:4 }}>
+                              {label}
+                              <span style={{ fontSize:9, opacity:active?1:0.3 }}>
+                                {active?(sortDir==="asc"?"▲":"▼"):"⇅"}
+                              </span>
+                            </span>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {porProduto.map((r,i) => {
+                      const open = prodAberto===r.produto;
+                      const spark = [r.vendasJun, r.vendasMai, r.vendasJun25];
+                      const trendUp = r.vendasJun25 >= r.vendasJun;
+                      return (
+                        <>
+                          <tr key={`r${i}`}
+                            style={{ borderBottom:open?"none":`1px solid ${T.borderL}`,
+                              background:open?"#EEF2FF":"transparent",
+                              transition:"background 0.15s" }}
+                            onMouseEnter={e=>{ if(!open) e.currentTarget.style.background="#F8FAFF"; }}
+                            onMouseLeave={e=>{ e.currentTarget.style.background=open?"#EEF2FF":"transparent"; }}>
+
+                            {/* Código */}
+                            <td onClick={()=>setProdAberto(p=>p===r.produto?null:r.produto)}
+                              style={{ padding:"10px 14px", color:"#6366F1", fontSize:11,
+                                whiteSpace:"nowrap", cursor:"pointer", fontWeight:700,
+                                fontFamily:"monospace", textDecoration:"underline" }}>
+                              {r.codProduto}
+                            </td>
+                            {/* Produto */}
+                            <td onClick={()=>setProdAberto(p=>p===r.produto?null:r.produto)}
+                              style={{ padding:"10px 14px", fontWeight:700, maxWidth:220,
+                                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                                cursor:"pointer", color:"#4338CA",
+                                textDecoration:"underline" }} title={r.produto}>
+                              {r.produto}
+                            </td>
+
+                            <td style={{ padding:"10px 14px", color:T.hint, fontSize:11,
+                              whiteSpace:"nowrap" }}>{r.linha}</td>
+                            <td style={{ padding:"10px 14px", whiteSpace:"nowrap", fontWeight:600 }}>
+                              {r.preco.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td>
+                            <td style={{ padding:"10px 14px", textAlign:"center", fontWeight:800,
+                              fontSize:15, color:r.estoque===0?T.coral:T.text }}>
+                              {r.estoque}
+                            </td>
+                            <td style={{ padding:"10px 14px" }}><Badge sit={r.situacaoConsolidada}/></td>
+                            <td style={{ padding:"10px 14px", textAlign:"center",
+                              color:T.sub, fontSize:12 }}>{r.vendasJun}</td>
+                            <td style={{ padding:"10px 14px", textAlign:"center",
+                              color:T.sub, fontSize:12 }}>{r.vendasMai}</td>
+                            {/* Jun/2025 com destaque */}
+                            <td style={{ padding:"10px 14px", textAlign:"center" }}>
+                              <span style={{ fontWeight:800, fontSize:14,
+                                color:trendUp?T.mint:T.coral }}>{r.vendasJun25}</span>
+                            </td>
+                            {/* Sparkline + média */}
+                            <td style={{ padding:"10px 14px", textAlign:"center" }}>
+                              <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"center" }}>
+                                <Spark values={spark} color={trendUp?T.mint:T.coral}/>
+                                <span style={{ fontSize:11, color:T.sub }}>{Math.round(r.mediaTrim)}</span>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {open && (
+                            <GraficoProduto key={`g${i}`}
+                              produto={r.produto}
+                              jun24={r.vendasJun} mai25={r.vendasMai} jun25={r.vendasJun25}
+                              onClose={()=>setProdAberto(null)}/>
+                          )}
+                        </>
+                      );
+                    })}
+                    {porProduto.length===0 && (
+                      <tr><td colSpan={10} style={{ padding:"60px", textAlign:"center", color:T.hint }}>
+                        <div style={{ fontSize:32, marginBottom:8 }}>◈</div>
+                        Nenhum produto encontrado com os filtros selecionados.
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Aba: Por filial ── */}
+          {aba==="filial" && (
+            <div>
+              {/* Barra de ação */}
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                marginBottom:16 }}>
+                <span style={{ fontSize:12, fontWeight:600, color:T.sub,
+                  textTransform:"uppercase", letterSpacing:0.6 }}>
+                  {porFilial.length} filial{porFilial.length!==1?"is":""}
+                  {filialF.length>0 && ` · ${filialF.length} selecionada${filialF.length!==1?"s":""}`}
+                </span>
+
+                <button onClick={() => {
+                  const cabecalho = [
+                    "Cod. Filial","Filial","Endereço","Número","Bairro","CEP","Cidade","UF",
+                    "Cod. Produto","Produto","Linha","Preço","Estoque",
+                    "Situação Estoque","Vendas Jun.","Vendas Mai.","Vendas Jun/2025",
+                    "Venda média Trim. fechado","% Vendas Mai.","% Vendas Jun/2025",
+                    "% Venda média Trim. fechado",
+                  ];
+
+                  const linhas = [];
+                  // Exporta exatamente o que está visível em tela:
+                  // porFilial já respeita filtros de cidade e filial
+                  // aplicamos também prodSel e sitF (igual ao FilialBlock)
+                  porFilial.forEach(([nomeFil, itensFil]) => {
+                    let itensFiltrados = itensFil.filter(r => meusCodigos.has(Number(r.codProduto)));
+                    if (prodSel.length > 0)
+                      itensFiltrados = itensFiltrados.filter(r => prodSel.includes(r.produto));
+                    if (sitF.length > 0)
+                      itensFiltrados = itensFiltrados.filter(r => sitF.includes(r.situacao));
+                    if (itensFiltrados.length === 0) return;
+
+                    itensFiltrados.forEach(r => {
+                      linhas.push([
+                        r.codFilial, r.filial, r.endereco, r.numero, r.bairro,
+                        r.cep, r.cidade, r.uf, r.codProduto, r.produto,
+                        r.linha, r.preco, r.estoque, r.situacao,
+                        r.vendasJun, r.vendasMai, r.vendasJun25, r.mediaTrim,
+                        r.pctMai, r.pctJun25, r.pctTrim,
+                      ]);
+                    });
+                  });
+
+                  if (linhas.length === 0) return;
+
+                  const ws = XLSX.utils.aoa_to_sheet([cabecalho, ...linhas]);
+                  ws["!cols"] = [
+                    {wch:10},{wch:26},{wch:22},{wch:8},{wch:14},{wch:12},{wch:20},{wch:4},
+                    {wch:12},{wch:36},{wch:20},{wch:10},{wch:10},
+                    {wch:16},{wch:12},{wch:12},{wch:14},{wch:18},{wch:14},{wch:16},{wch:24},
+                  ];
+
+                  const wb = XLSX.utils.book_new();
+                  XLSX.utils.book_append_sheet(wb, ws, "Por Filial");
+
+                  const hoje = new Date().toISOString().slice(0,10);
+                  XLSX.writeFile(wb, `reposicao_filial_${hoje}.xlsx`);
+                }}
+                  style={{ display:"flex", alignItems:"center", gap:7,
+                    padding:"7px 14px", borderRadius:9, border:"none", cursor:"pointer",
+                    background:T.mint, color:T.navy, fontSize:12, fontWeight:700,
+                    boxShadow:"0 2px 8px rgba(0,201,167,0.3)", transition:"all 0.15s" }}
+                  onMouseEnter={e=>{ e.currentTarget.style.background="#00b896"; e.currentTarget.style.boxShadow="0 4px 14px rgba(0,201,167,0.45)"; }}
+                  onMouseLeave={e=>{ e.currentTarget.style.background=T.mint; e.currentTarget.style.boxShadow="0 2px 8px rgba(0,201,167,0.3)"; }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                  Exportar Excel
+                </button>
+              </div>
+              {porFilial
+                .map(([nome,itens])=>(
+                  <FilialBlock key={nome} filial={nome} itens={itens}
+                    situacaoFiltro={sitF} produtosSelecionados={prodSel}
+                    onSituacaoChange={setSitF}/>
+                ))
+              }
+              {porFilial.length===0 && (
+                <div style={{ padding:"60px", textAlign:"center", color:T.hint,
+                  background:T.surface, borderRadius:16, border:`1px solid ${T.borderL}` }}>
+                  Nenhuma filial encontrada.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>
