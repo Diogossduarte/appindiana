@@ -965,92 +965,171 @@ function MultiCheckFilter({ label, options, selected, onChange, colorMap }) {
 }
 
 // ─── Aba Maps — mapa estilizado com pinos por cidade ──────────────────────────
+// ─── Cache de geocoding no localStorage ───────────────────────────────────────
+function getGeoCache() {
+  try { return JSON.parse(localStorage.getItem("geo_cache") || "{}"); }
+  catch { return {}; }
+}
+function saveGeoCache(cache) {
+  try { localStorage.setItem("geo_cache", JSON.stringify(cache)); } catch {}
+}
+
 function MapsTab({ rows, meusCodigos, meus }) {
-  const dados = useMemo(() => {
+  const [coordsMap, setCoordsMap] = useState({}); // cidade+uf -> {lat,lng} | "loading" | "error"
+  const [cidadeAtiva, setCidadeAtiva] = useState(null);
+  const cacheRef = useRef(getGeoCache());
+
+  // Lista de cidades+UF únicas presentes na planilha atual
+  const cidadesBrutas = useMemo(() => {
     const base = rows.filter(r => meus ? meusCodigos.has(Number(r.codProduto)) : true);
     const map = new Map();
     base.forEach(r => {
       if (!r.cidade) return;
-      if (!map.has(r.cidade)) map.set(r.cidade, new Set());
-      map.get(r.cidade).add(r.filial);
+      const key = `${r.cidade}|${r.uf||""}`;
+      if (!map.has(key)) map.set(key, { cidade:r.cidade, uf:r.uf||"", filiais:new Set() });
+      map.get(key).filiais.add(r.filial);
     });
-    return [...map.entries()]
-      .map(([cidade, filiaisSet]) => ({
-        cidade,
-        totalLojas: filiaisSet.size,
-        coord: CIDADE_COORDS[cidade.toUpperCase()] || null,
-      }))
+    return [...map.values()]
+      .map(v => ({ cidade:v.cidade, uf:v.uf, totalLojas:v.filiais.size,
+        key:`${v.cidade.toUpperCase()}|${v.uf.toUpperCase()}` }))
       .sort((a,b) => b.totalLojas - a.totalLojas);
   }, [rows, meusCodigos, meus]);
 
-  const comCoord = dados.filter(d => d.coord);
-  const semCoord = dados.filter(d => !d.coord);
+  // Geocoding automático: busca coordenadas para cidades desconhecidas
+  useEffect(() => {
+    let cancelled = false;
 
-  // Bounding box para posicionar os pinos proporcionalmente dentro do mapa
+    async function geocodeUma(item) {
+      const { key, cidade, uf } = item;
+
+      // 1. Cache fixo conhecido (cidades já mapeadas manualmente)
+      if (CIDADE_COORDS[key.split("|")[0]]) {
+        return CIDADE_COORDS[key.split("|")[0]];
+      }
+      // 2. Cache local do navegador (já buscado antes)
+      if (cacheRef.current[key]) return cacheRef.current[key];
+
+      // 3. Busca via Nominatim (OpenStreetMap) — gratuito, sem chave de API
+      try {
+        const query = encodeURIComponent(`${cidade}, ${uf}, Brasil`);
+        const resp = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${query}&format=json&limit=1&countrycodes=br`,
+          { headers: { "Accept-Language": "pt-BR" } }
+        );
+        const data = await resp.json();
+        if (data && data[0]) {
+          const coord = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+          cacheRef.current[key] = coord;
+          saveGeoCache(cacheRef.current);
+          return coord;
+        }
+      } catch {}
+      return null;
+    }
+
+    async function processarTodas() {
+      for (const item of cidadesBrutas) {
+        if (cancelled) return;
+        if (coordsMap[item.key] && coordsMap[item.key] !== "loading") continue;
+        setCoordsMap(prev => ({ ...prev, [item.key]: "loading" }));
+        const coord = await geocodeUma(item);
+        if (cancelled) return;
+        setCoordsMap(prev => ({ ...prev, [item.key]: coord || "error" }));
+        // Respeita rate-limit do Nominatim (máx 1 req/seg)
+        await new Promise(r => setTimeout(r, 1100));
+      }
+    }
+
+    if (cidadesBrutas.length > 0) processarTodas();
+    return () => { cancelled = true; };
+  }, [cidadesBrutas]);
+
+  // Junta dados + coordenadas resolvidas
+  const dados = useMemo(() => cidadesBrutas.map(item => {
+    const c = coordsMap[item.key];
+    return {
+      cidade: item.cidade,
+      uf: item.uf,
+      totalLojas: item.totalLojas,
+      coord: (c && c !== "loading" && c !== "error") ? c : null,
+      carregando: c === "loading" || c === undefined,
+    };
+  }), [cidadesBrutas, coordsMap]);
+
+  const comCoord = dados.filter(d => d.coord);
+  const carregandoAlgum = dados.some(d => d.carregando);
+
+  const ativa = cidadeAtiva
+    ? comCoord.find(d => d.cidade === cidadeAtiva)
+    : comCoord[0];
+
   const lats = comCoord.map(d => d.coord.lat);
   const lngs = comCoord.map(d => d.coord.lng);
-  const minLat = Math.min(...lats, -19.5), maxLat = Math.max(...lats, -18.5);
-  const minLng = Math.min(...lngs, -43.5), maxLng = Math.max(...lngs, -41);
-  const padLat = (maxLat-minLat)*0.25 || 0.5;
-  const padLng = (maxLng-minLng)*0.25 || 0.5;
+  const minLat = lats.length ? Math.min(...lats) : -15;
+  const maxLat = lats.length ? Math.max(...lats) : -15;
+  const minLng = lngs.length ? Math.min(...lngs) : -47;
+  const maxLng = lngs.length ? Math.max(...lngs) : -47;
+  const padLat = Math.max((maxLat-minLat)*0.4, 0.15);
+  const padLng = Math.max((maxLng-minLng)*0.4, 0.15);
 
-  function posPct(coord) {
-    const x = ((coord.lng - (minLng-padLng)) / ((maxLng+padLng)-(minLng-padLng))) * 100;
-    const y = 100 - ((coord.lat - (minLat-padLat)) / ((maxLat+padLat)-(minLat-padLat))) * 100;
-    return { left:`${x}%`, top:`${y}%` };
+  function buildMapUrl() {
+    if (comCoord.length === 0) return null;
+    const bbox = `${minLng-padLng},${minLat-padLat},${maxLng+padLng},${maxLat+padLat}`;
+    const marker = ativa ? `&marker=${ativa.coord.lat},${ativa.coord.lng}` : "";
+    return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik${marker}`;
   }
-
-  const maxLojas = Math.max(...dados.map(d => d.totalLojas), 1);
+  const mapUrl = buildMapUrl();
 
   return (
     <div style={{ display:"flex", gap:16, flexWrap:"wrap" }}>
-      {/* Mapa visual */}
+      {/* Mapa real OpenStreetMap */}
       <div style={{ flex:"2 1 480px", minWidth:320,
-        background:"linear-gradient(160deg, #EAF2FF 0%, #DCE9FF 100%)",
         borderRadius:16, border:`1px solid ${T.borderL}`,
         position:"relative", height:460, overflow:"hidden",
-        boxShadow:"0 2px 12px rgba(10,15,30,0.06)" }}>
+        boxShadow:"0 2px 12px rgba(10,15,30,0.06)", background:"#EAF2FF" }}>
 
-        {/* Grade decorativa estilo mapa */}
-        <div style={{ position:"absolute", inset:0, opacity:0.4,
-          backgroundImage:"linear-gradient(rgba(27,127,232,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(27,127,232,0.08) 1px, transparent 1px)",
-          backgroundSize:"40px 40px" }}/>
+        {mapUrl ? (
+          <iframe
+            key={mapUrl}
+            title="Mapa de cobertura"
+            src={mapUrl}
+            style={{ width:"100%", height:"100%", border:"none" }}
+            loading="lazy"
+          />
+        ) : carregandoAlgum ? (
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+            height:"100%", color:"#64748B", fontSize:13, textAlign:"center", padding:24, gap:10 }}>
+            <div style={{ width:24, height:24, border:"3px solid #CBD5E8",
+              borderTopColor:"#1B7FE8", borderRadius:"50%",
+              animation:"spin 0.8s linear infinite" }}/>
+            <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
+            Localizando cidades no mapa...
+          </div>
+        ) : (
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
+            height:"100%", color:"#64748B", fontSize:13, textAlign:"center", padding:24 }}>
+            Não foi possível localizar as cidades desta planilha.
+          </div>
+        )}
 
-        {/* Label estado */}
-        <div style={{ position:"absolute", top:14, left:18, fontSize:11, fontWeight:700,
-          color:"#64748B", letterSpacing:1, textTransform:"uppercase" }}>
-          Minas Gerais · Vale do Rio Doce
-        </div>
-
-        {/* Pinos */}
-        {comCoord.map(({ cidade, totalLojas, coord }) => {
-          const pos = posPct(coord);
-          const size = 36 + (totalLojas / maxLojas) * 22;
-          return (
-            <div key={cidade} style={{ position:"absolute", left:pos.left, top:pos.top,
-              transform:"translate(-50%, -100%)", display:"flex", flexDirection:"column",
-              alignItems:"center", cursor:"default" }}>
-              {/* Badge contagem */}
-              <div style={{ background:"#fff", borderRadius:20, padding:"3px 10px",
-                fontSize:11, fontWeight:700, color:"#0D1F5C", marginBottom:4,
-                boxShadow:"0 2px 8px rgba(10,15,30,0.15)", whiteSpace:"nowrap" }}>
-                {cidade} · {totalLojas} loja{totalLojas!==1?"s":""}
-              </div>
-              {/* Pino */}
-              <svg width={size} height={size*1.3} viewBox="0 0 24 32" style={{ filter:"drop-shadow(0 3px 6px rgba(13,31,92,0.35))" }}>
-                <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20c0-6.6-5.4-12-12-12z"
-                  fill="#1B7FE8"/>
-                <circle cx="12" cy="12" r="5.5" fill="#fff"/>
-                <circle cx="12" cy="12" r="3" fill="#0D1F5C"/>
-              </svg>
-            </div>
-          );
-        })}
-
-        {comCoord.length === 0 && (
-          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center",
-            justifyContent:"center", color:"#64748B", fontSize:13, textAlign:"center", padding:24 }}>
-            Nenhuma coordenada conhecida para as cidades desta planilha.
+        {/* Chips de cidade sobrepostos no mapa para selecionar */}
+        {comCoord.length > 1 && (
+          <div style={{ position:"absolute", top:12, left:12, right:12,
+            display:"flex", gap:6, flexWrap:"wrap", zIndex:10 }}>
+            {comCoord.map(({ cidade, uf, totalLojas }) => {
+              const on = ativa?.cidade === cidade;
+              return (
+                <button key={cidade+uf} onClick={() => setCidadeAtiva(cidade)}
+                  style={{ background: on ? "#1B7FE8" : "#fff",
+                    color: on ? "#fff" : "#0D1F5C",
+                    border:"none", borderRadius:20, padding:"6px 12px",
+                    fontSize:12, fontWeight:700, cursor:"pointer",
+                    boxShadow:"0 2px 8px rgba(10,15,30,0.2)",
+                    transition:"all 0.15s" }}>
+                  📍 {cidade} · {totalLojas}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1067,18 +1146,36 @@ function MapsTab({ rows, meusCodigos, meus }) {
             </span>
           </div>
           <div>
-            {dados.map(({ cidade, totalLojas }, i) => (
-              <div key={cidade} style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                padding:"12px 18px", borderBottom:i<dados.length-1?`1px solid ${T.borderL}`:"none" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                  <div style={{ width:8, height:8, borderRadius:"50%", background:"#1B7FE8", flexShrink:0 }}/>
-                  <span style={{ fontSize:13, fontWeight:600, color:T.text }}>{cidade}</span>
+            {dados.map(({ cidade, uf, totalLojas, coord, carregando }, i) => {
+              const on = ativa?.cidade === cidade;
+              return (
+                <div key={cidade+uf} onClick={() => coord && setCidadeAtiva(cidade)}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                    padding:"12px 18px", cursor:coord?"pointer":"default",
+                    background:on?"#EEF6FF":"transparent",
+                    borderBottom:i<dados.length-1?`1px solid ${T.borderL}`:"none",
+                    transition:"background 0.15s" }}
+                  onMouseEnter={e=>{ if(!on) e.currentTarget.style.background="#F8FAFF"; }}
+                  onMouseLeave={e=>{ e.currentTarget.style.background=on?"#EEF6FF":"transparent"; }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    {carregando ? (
+                      <div style={{ width:8, height:8, border:"1.5px solid #CBD5E8",
+                        borderTopColor:"#1B7FE8", borderRadius:"50%",
+                        animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
+                    ) : (
+                      <div style={{ width:8, height:8, borderRadius:"50%",
+                        background: coord ? "#1B7FE8" : "#CBD5E8", flexShrink:0 }}/>
+                    )}
+                    <span style={{ fontSize:13, fontWeight: on?700:600, color:T.text }}>
+                      {cidade}{uf && <span style={{ color:T.hint, fontWeight:400 }}> · {uf}</span>}
+                    </span>
+                  </div>
+                  <span style={{ fontSize:13, fontWeight:800, color:"#1B7FE8" }}>
+                    {totalLojas}
+                  </span>
                 </div>
-                <span style={{ fontSize:13, fontWeight:800, color:"#1B7FE8" }}>
-                  {totalLojas}
-                </span>
-              </div>
-            ))}
+              );
+            })}
             {dados.length === 0 && (
               <div style={{ padding:"32px 18px", textAlign:"center", color:T.hint, fontSize:13 }}>
                 Nenhuma cidade encontrada.
