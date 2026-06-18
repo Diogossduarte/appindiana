@@ -741,6 +741,7 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
   const [aberto, setAberto] = useState(true);
   const [sortFilial, setSortFilial] = useState(null);
   const [sortDirFilial, setSortDirFilial] = useState("asc");
+  const [top10Aberto, setTop10Aberto] = useState(false);
 
   // situacaoFiltro é um array vindo do estado global (sitF)
   const sitAtiva = Array.isArray(situacaoFiltro) ? situacaoFiltro : (situacaoFiltro ? [situacaoFiltro] : []);
@@ -778,6 +779,14 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
       return sortDirFilial==="asc" ? va-vb : vb-va;
     });
   }, [base, sortFilial, sortDirFilial]);
+
+  // Top 10 produtos mais vendidos nesta filial (coluna P — mês anterior fechado)
+  const top10 = useMemo(() => {
+    return [...base]
+      .sort((a,b) => b.vendasMai - a.vendasMai)
+      .slice(0, 10);
+  }, [base]);
+  const maxVendaTop10 = Math.max(...top10.map(r => r.vendasMai), 1);
 
   function pill(sit, count, bg, color, dot) {
     if (count===0) return null;
@@ -831,6 +840,18 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
           <span style={{ fontSize:12, color:T.sub, marginLeft:4 }}>
             {totalVendas} vend.
           </span>
+          <button onClick={e=>{ e.stopPropagation(); setTop10Aberto(v=>!v); if(!aberto) setAberto(true); }}
+            style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px",
+              borderRadius:20, border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
+              background: top10Aberto ? "#1B7FE8" : "#EEF6FF",
+              color: top10Aberto ? "#fff" : "#1B7FE8",
+              transition:"all 0.15s" }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>
+            </svg>
+            Top 10
+          </button>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.hint}
             strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
             style={{ transform:aberto?"rotate(180deg)":"rotate(0)", transition:"transform 0.2s" }}>
@@ -838,6 +859,57 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
           </svg>
         </div>
       </div>
+
+      {/* Painel Top 10 produtos mais vendidos */}
+      {top10Aberto && aberto && (
+        <div style={{ padding:"16px 18px", background:"#F8FAFF",
+          borderBottom:`1px solid ${T.borderL}` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+            <div style={{ width:22, height:22, borderRadius:6, background:"#1B7FE8",
+              display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                stroke="#fff" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>
+              </svg>
+            </div>
+            <span style={{ fontSize:12, fontWeight:700, color:"#0D1F5C",
+              letterSpacing:0.4, textTransform:"uppercase" }}>
+              Top 10 mais vendidos · {colLabels.vendasMai}
+            </span>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            {top10.map((r, i) => (
+              <div key={r.codProduto+i} style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ width:18, fontSize:11, fontWeight:800,
+                  color: i<3 ? "#1B7FE8" : T.hint, flexShrink:0, textAlign:"right" }}>
+                  {i+1}
+                </span>
+                <span style={{ fontSize:12, fontWeight:600, color:T.text, width:200,
+                  flexShrink:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}
+                  title={r.produto}>
+                  {r.produto}
+                </span>
+                <div style={{ flex:1, height:16, background:"#E2E8F4", borderRadius:8,
+                  overflow:"hidden", position:"relative" }}>
+                  <div style={{ height:"100%",
+                    width:`${(r.vendasMai/maxVendaTop10)*100}%`,
+                    background: i<3 ? "#1B7FE8" : "#94B8E8",
+                    borderRadius:8, transition:"width 0.3s" }}/>
+                </div>
+                <span style={{ fontSize:12, fontWeight:800, color:"#0D1F5C", width:32,
+                  flexShrink:0, textAlign:"right" }}>
+                  {r.vendasMai}
+                </span>
+              </div>
+            ))}
+            {top10.length === 0 && (
+              <div style={{ fontSize:12, color:T.hint, textAlign:"center", padding:"12px 0" }}>
+                Nenhum produto com vendas registradas.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {aberto && (
         <div style={{ overflowX:"auto" }}>
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
@@ -976,8 +1048,24 @@ function saveGeoCache(cache) {
 
 function MapsTab({ rows, meusCodigos, meus }) {
   const [coordsMap, setCoordsMap] = useState({}); // cidade+uf -> {lat,lng} | "loading" | "error"
-  const [cidadeAtiva, setCidadeAtiva] = useState(null);
   const cacheRef = useRef(getGeoCache());
+  const mapDivRef = useRef(null);
+  const leafletMapRef = useRef(null);
+  const [leafletReady, setLeafletReady] = useState(!!window.L);
+
+  // Carrega Leaflet via CDN se ainda não estiver disponível
+  useEffect(() => {
+    if (window.L) { setLeafletReady(true); return; }
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
+    document.head.appendChild(link);
+
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
+    script.onload = () => setLeafletReady(true);
+    document.head.appendChild(script);
+  }, []);
 
   // Lista de cidades+UF únicas presentes na planilha atual
   const cidadesBrutas = useMemo(() => {
@@ -1001,15 +1089,9 @@ function MapsTab({ rows, meusCodigos, meus }) {
 
     async function geocodeUma(item) {
       const { key, cidade, uf } = item;
-
-      // 1. Cache fixo conhecido (cidades já mapeadas manualmente)
-      if (CIDADE_COORDS[key.split("|")[0]]) {
-        return CIDADE_COORDS[key.split("|")[0]];
-      }
-      // 2. Cache local do navegador (já buscado antes)
+      if (CIDADE_COORDS[key.split("|")[0]]) return CIDADE_COORDS[key.split("|")[0]];
       if (cacheRef.current[key]) return cacheRef.current[key];
 
-      // 3. Busca via Nominatim (OpenStreetMap) — gratuito, sem chave de API
       try {
         const query = encodeURIComponent(`${cidade}, ${uf}, Brasil`);
         const resp = await fetch(
@@ -1035,7 +1117,6 @@ function MapsTab({ rows, meusCodigos, meus }) {
         const coord = await geocodeUma(item);
         if (cancelled) return;
         setCoordsMap(prev => ({ ...prev, [item.key]: coord || "error" }));
-        // Respeita rate-limit do Nominatim (máx 1 req/seg)
         await new Promise(r => setTimeout(r, 1100));
       }
     }
@@ -1058,78 +1139,92 @@ function MapsTab({ rows, meusCodigos, meus }) {
 
   const comCoord = dados.filter(d => d.coord);
   const carregandoAlgum = dados.some(d => d.carregando);
+  const maxLojas = Math.max(...dados.map(d => d.totalLojas), 1);
 
-  const ativa = cidadeAtiva
-    ? comCoord.find(d => d.cidade === cidadeAtiva)
-    : comCoord[0];
+  // Cria/atualiza o mapa Leaflet com TODOS os pinos de uma vez
+  useEffect(() => {
+    if (!leafletReady || !mapDivRef.current || comCoord.length === 0) return;
+    const L = window.L;
 
-  const lats = comCoord.map(d => d.coord.lat);
-  const lngs = comCoord.map(d => d.coord.lng);
-  const minLat = lats.length ? Math.min(...lats) : -15;
-  const maxLat = lats.length ? Math.max(...lats) : -15;
-  const minLng = lngs.length ? Math.min(...lngs) : -47;
-  const maxLng = lngs.length ? Math.max(...lngs) : -47;
-  const padLat = Math.max((maxLat-minLat)*0.4, 0.15);
-  const padLng = Math.max((maxLng-minLng)*0.4, 0.15);
+    // Cria o mapa uma única vez
+    if (!leafletMapRef.current) {
+      leafletMapRef.current = L.map(mapDivRef.current, {
+        zoomControl: true, scrollWheelZoom: true,
+      });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '© OpenStreetMap',
+        maxZoom: 18,
+      }).addTo(leafletMapRef.current);
+      leafletMapRef.current._markersLayer = L.layerGroup().addTo(leafletMapRef.current);
+    }
 
-  function buildMapUrl() {
-    if (comCoord.length === 0) return null;
-    const bbox = `${minLng-padLng},${minLat-padLat},${maxLng+padLng},${maxLat+padLat}`;
-    const marker = ativa ? `&marker=${ativa.coord.lat},${ativa.coord.lng}` : "";
-    return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik${marker}`;
-  }
-  const mapUrl = buildMapUrl();
+    const map = leafletMapRef.current;
+    map._markersLayer.clearLayers();
+
+    const bounds = [];
+    comCoord.forEach(({ cidade, uf, totalLojas, coord }) => {
+      bounds.push([coord.lat, coord.lng]);
+      const size = 28 + (totalLojas / maxLojas) * 18;
+
+      const icon = L.divIcon({
+        className: "",
+        html: `
+          <div style="display:flex;flex-direction:column;align-items:center;transform:translateY(-100%);">
+            <div style="background:#fff;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;
+              color:#0D1F5C;margin-bottom:4px;box-shadow:0 2px 8px rgba(10,15,30,0.25);white-space:nowrap;
+              font-family:'Inter','Segoe UI',sans-serif;">
+              ${cidade}${uf?" · "+uf:""} · ${totalLojas} loja${totalLojas!==1?"s":""}
+            </div>
+            <svg width="${size}" height="${size*1.3}" viewBox="0 0 24 32" style="filter:drop-shadow(0 3px 6px rgba(13,31,92,0.4));">
+              <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20c0-6.6-5.4-12-12-12z" fill="#1B7FE8"/>
+              <circle cx="12" cy="12" r="5.5" fill="#fff"/>
+              <circle cx="12" cy="12" r="3" fill="#0D1F5C"/>
+            </svg>
+          </div>`,
+        iconSize: [size, size*1.3],
+        iconAnchor: [size/2, size*1.3],
+      });
+
+      L.marker([coord.lat, coord.lng], { icon }).addTo(map._markersLayer);
+    });
+
+    // Ajusta o zoom para enquadrar todos os pinos de uma vez
+    if (bounds.length === 1) {
+      map.setView(bounds[0], 12);
+    } else if (bounds.length > 1) {
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+
+    // Corrige bug de renderização do Leaflet quando o container muda de tamanho
+    setTimeout(() => map.invalidateSize(), 100);
+  }, [leafletReady, comCoord, maxLojas]);
 
   return (
     <div style={{ display:"flex", gap:16, flexWrap:"wrap" }}>
-      {/* Mapa real OpenStreetMap */}
+      {/* Mapa real com todos os pinos */}
       <div style={{ flex:"2 1 480px", minWidth:320,
         borderRadius:16, border:`1px solid ${T.borderL}`,
         position:"relative", height:460, overflow:"hidden",
         boxShadow:"0 2px 12px rgba(10,15,30,0.06)", background:"#EAF2FF" }}>
 
-        {mapUrl ? (
-          <iframe
-            key={mapUrl}
-            title="Mapa de cobertura"
-            src={mapUrl}
-            style={{ width:"100%", height:"100%", border:"none" }}
-            loading="lazy"
-          />
-        ) : carregandoAlgum ? (
+        <style>{"@keyframes spin { to { transform: rotate(360deg); } } .leaflet-control-attribution { font-size: 9px !important; }"}</style>
+
+        <div ref={mapDivRef} style={{ width:"100%", height:"100%",
+          display: comCoord.length > 0 ? "block" : "none" }}/>
+
+        {comCoord.length === 0 && carregandoAlgum && (
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
             height:"100%", color:"#64748B", fontSize:13, textAlign:"center", padding:24, gap:10 }}>
             <div style={{ width:24, height:24, border:"3px solid #CBD5E8",
               borderTopColor:"#1B7FE8", borderRadius:"50%",
               animation:"spin 0.8s linear infinite" }}/>
-            <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
             Localizando cidades no mapa...
           </div>
-        ) : (
+        )}
+        {comCoord.length === 0 && !carregandoAlgum && (
           <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
             height:"100%", color:"#64748B", fontSize:13, textAlign:"center", padding:24 }}>
             Não foi possível localizar as cidades desta planilha.
-          </div>
-        )}
-
-        {/* Chips de cidade sobrepostos no mapa para selecionar */}
-        {comCoord.length > 1 && (
-          <div style={{ position:"absolute", top:12, left:12, right:12,
-            display:"flex", gap:6, flexWrap:"wrap", zIndex:10 }}>
-            {comCoord.map(({ cidade, uf, totalLojas }) => {
-              const on = ativa?.cidade === cidade;
-              return (
-                <button key={cidade+uf} onClick={() => setCidadeAtiva(cidade)}
-                  style={{ background: on ? "#1B7FE8" : "#fff",
-                    color: on ? "#fff" : "#0D1F5C",
-                    border:"none", borderRadius:20, padding:"6px 12px",
-                    fontSize:12, fontWeight:700, cursor:"pointer",
-                    boxShadow:"0 2px 8px rgba(10,15,30,0.2)",
-                    transition:"all 0.15s" }}>
-                  📍 {cidade} · {totalLojas}
-                </button>
-              );
-            })}
           </div>
         )}
       </div>
@@ -1146,36 +1241,29 @@ function MapsTab({ rows, meusCodigos, meus }) {
             </span>
           </div>
           <div>
-            {dados.map(({ cidade, uf, totalLojas, coord, carregando }, i) => {
-              const on = ativa?.cidade === cidade;
-              return (
-                <div key={cidade+uf} onClick={() => coord && setCidadeAtiva(cidade)}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                    padding:"12px 18px", cursor:coord?"pointer":"default",
-                    background:on?"#EEF6FF":"transparent",
-                    borderBottom:i<dados.length-1?`1px solid ${T.borderL}`:"none",
-                    transition:"background 0.15s" }}
-                  onMouseEnter={e=>{ if(!on) e.currentTarget.style.background="#F8FAFF"; }}
-                  onMouseLeave={e=>{ e.currentTarget.style.background=on?"#EEF6FF":"transparent"; }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    {carregando ? (
-                      <div style={{ width:8, height:8, border:"1.5px solid #CBD5E8",
-                        borderTopColor:"#1B7FE8", borderRadius:"50%",
-                        animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
-                    ) : (
-                      <div style={{ width:8, height:8, borderRadius:"50%",
-                        background: coord ? "#1B7FE8" : "#CBD5E8", flexShrink:0 }}/>
-                    )}
-                    <span style={{ fontSize:13, fontWeight: on?700:600, color:T.text }}>
-                      {cidade}{uf && <span style={{ color:T.hint, fontWeight:400 }}> · {uf}</span>}
-                    </span>
-                  </div>
-                  <span style={{ fontSize:13, fontWeight:800, color:"#1B7FE8" }}>
-                    {totalLojas}
+            {dados.map(({ cidade, uf, totalLojas, coord, carregando }, i) => (
+              <div key={cidade+uf}
+                style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                  padding:"12px 18px",
+                  borderBottom:i<dados.length-1?`1px solid ${T.borderL}`:"none" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  {carregando ? (
+                    <div style={{ width:8, height:8, border:"1.5px solid #CBD5E8",
+                      borderTopColor:"#1B7FE8", borderRadius:"50%",
+                      animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
+                  ) : (
+                    <div style={{ width:8, height:8, borderRadius:"50%",
+                      background: coord ? "#1B7FE8" : "#CBD5E8", flexShrink:0 }}/>
+                  )}
+                  <span style={{ fontSize:13, fontWeight:600, color:T.text }}>
+                    {cidade}{uf && <span style={{ color:T.hint, fontWeight:400 }}> · {uf}</span>}
                   </span>
                 </div>
-              );
-            })}
+                <span style={{ fontSize:13, fontWeight:800, color:"#1B7FE8" }}>
+                  {totalLojas}
+                </span>
+              </div>
+            ))}
             {dados.length === 0 && (
               <div style={{ padding:"32px 18px", textAlign:"center", color:T.hint, fontSize:13 }}>
                 Nenhuma cidade encontrada.
