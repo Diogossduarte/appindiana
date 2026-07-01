@@ -52,6 +52,17 @@ const CODIGOS_INVERNO = [
   14802, 168773, 168895, 193350, 196284, 196286, 186182, 186350, 191672,
 ];
 
+function loadAlertaCodigos() {
+  try {
+    const raw = localStorage.getItem("alerta_codigos");
+    if (raw) return new Set(JSON.parse(raw).map(Number));
+  } catch {}
+  return new Set(CODIGOS_INVERNO); // padrão: os 9 produtos de inverno
+}
+function saveAlertaCodigos(set) {
+  try { localStorage.setItem("alerta_codigos", JSON.stringify([...set])); } catch {}
+}
+
 // ─── Linhas de produto (classificação comercial própria) ─────────────────────
 const LINHAS_PRODUTO = ["Dinâmica", "Foco", "Sinergia", "Triunfo", "Sintonia", "Agilidade"];
 
@@ -164,9 +175,12 @@ function loadSavedCodigos() {
 }
 
 // ─── Modal de configuração de produtos ───────────────────────────────────────
-function SettingsModal({ allRows, meusCodigos, onSave, onClose }) {
+function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, onSaveAlerta, linhaAtiva }) {
+  const [aba, setAba] = useState("grade"); // "grade" | "alerta"
   const [busca, setBusca] = useState("");
   const [selecionados, setSelecionados] = useState(() => new Set(meusCodigos));
+  const [alertaLocal, setAlertaLocal] = useState(() => new Set(alertaCodigos || []));
+  const [buscaAlerta, setBuscaAlerta] = useState("");
   const [linhasMap, setLinhasMap] = useState(() => loadLinhasMap());
   const [linhaFiltro, setLinhaFiltro] = useState(null); // null | "Sem linha" | nome da linha
   const [modoAtribuir, setModoAtribuir] = useState(null);
@@ -270,6 +284,7 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose }) {
   function salvar() {
     try { localStorage.setItem("meus_codigos", JSON.stringify([...selecionados])); } catch {}
     onSave(selecionados);
+    if (onSaveAlerta) onSaveAlerta(alertaLocal);
     onClose();
   }
 
@@ -316,6 +331,25 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose }) {
             fontSize:16, display:"flex", alignItems:"center", justifyContent:"center",
             fontWeight:700 }}>×</button>
         </div>
+
+        {/* Tabs: Minha grade / Configurar alerta */}
+        <div style={{ display:"flex", borderBottom:`1px solid ${T.borderL}`, background:T.surface }}>
+          {[
+            { id:"grade", label:"Minha grade" },
+            { id:"alerta", label:"⚠ Configurar alerta" },
+          ].map(t => (
+            <button key={t.id} onClick={() => setAba(t.id)}
+              style={{ flex:1, padding:"11px 8px", fontSize:12, fontWeight:700, cursor:"pointer",
+                border:"none", borderBottom:`3px solid ${aba===t.id?"#1B7FE8":"transparent"}`,
+                background:"transparent", color:aba===t.id?"#1B7FE8":T.sub,
+                transition:"all 0.15s" }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ─── ABA: MINHA GRADE ─── */}
+        {aba === "grade" && (<>
 
         {/* Linhas de produto — cards com ação clara */}
         <div style={{ padding:"16px 24px", borderBottom:`1px solid ${T.borderL}`, background:"#FAFBFF" }}>
@@ -590,12 +624,130 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose }) {
           })}
         </div>
 
+        </>)}
+
+        {/* ─── ABA: CONFIGURAR ALERTA ─── */}
+        {aba === "alerta" && (
+          <div style={{ display:"flex", flexDirection:"column", flex:1, overflow:"hidden" }}>
+
+            {/* Instrução + chip de linha ativa */}
+            <div style={{ padding:"14px 24px", background:"#FFFBEB",
+              borderBottom:`1px solid #FDE68A`, fontSize:12, color:"#92400E" }}>
+              <span style={{ fontWeight:700 }}>⚠ Alerta pós-upload</span> — marque os produtos que devem
+              aparecer no popup ao importar uma nova planilha.
+              {linhaAtiva && (
+                <span style={{ display:"inline-flex", alignItems:"center", gap:4, marginLeft:8,
+                  background:"#FEF3C7", border:"1px solid #F59E0B", borderRadius:12,
+                  padding:"2px 8px", fontSize:11, fontWeight:700, color:"#92400E" }}>
+                  Linha: {linhaAtiva}
+                  <span style={{ opacity:0.6, fontSize:10 }}> (filtro ativo)</span>
+                </span>
+              )}
+            </div>
+
+            {/* Busca */}
+            <div style={{ padding:"12px 24px", borderBottom:`1px solid ${T.borderL}` }}>
+              <div style={{ position:"relative" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke={T.hint} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+                  style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)" }}>
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                </svg>
+                <input value={buscaAlerta} onChange={e=>setBuscaAlerta(e.target.value)}
+                  placeholder="Buscar produto por nome ou código..."
+                  style={{ width:"100%", padding:"8px 10px 8px 32px", fontSize:13,
+                    border:`1.5px solid ${T.borderL}`, borderRadius:10, outline:"none",
+                    color:T.text, background:T.snow, boxSizing:"border-box" }}/>
+              </div>
+            </div>
+
+            {/* Lista de produtos filtrada pela linha ativa + busca */}
+            <div style={{ flex:1, overflowY:"auto", padding:"8px 0" }}>
+              {todosProdutos
+                .filter(p => {
+                  // Mostra apenas produtos que estão na grade selecionada
+                  if (!selecionados.has(p.cod)) return false;
+                  // Se há linha ativa, filtra também por linha
+                  if (linhaAtiva && linhasMap[p.cod] !== linhaAtiva) return false;
+                  if (!buscaAlerta.trim()) return true;
+                  const q = buscaAlerta.toUpperCase();
+                  return p.nome.toUpperCase().includes(q) || String(p.cod).includes(q);
+                })
+                .map((p, i, arr) => {
+                  const on = alertaLocal.has(p.cod);
+                  const cor = linhasMap[p.cod] ? CORES_LINHA[linhasMap[p.cod]] : "#94A3B8";
+                  return (
+                    <div key={p.cod}
+                      onClick={() => setAlertaLocal(prev => {
+                        const next = new Set(prev);
+                        on ? next.delete(p.cod) : next.add(p.cod);
+                        return next;
+                      })}
+                      style={{ display:"flex", alignItems:"center", gap:14, padding:"10px 24px",
+                        cursor:"pointer", transition:"background 0.1s",
+                        background: on ? "#FFFBEB" : T.surface,
+                        borderBottom:i < arr.length-1 ? `1px solid ${T.borderL}` : "none" }}
+                      onMouseEnter={e=>{ e.currentTarget.style.background=on?"#FEF3C7":"#F8FAFF"; }}
+                      onMouseLeave={e=>{ e.currentTarget.style.background=on?"#FFFBEB":T.surface; }}>
+
+                      {/* Checkbox */}
+                      <div style={{ width:20, height:20, borderRadius:6, flexShrink:0,
+                        background: on ? "#F59E0B" : T.surface,
+                        border:`2px solid ${on ? "#F59E0B" : T.borderL}`,
+                        display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        {on && <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                          <polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2.2"
+                            strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>}
+                      </div>
+
+                      {/* Info */}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, fontWeight:on?700:500,
+                          color:on?"#92400E":T.text,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {p.nome}
+                        </div>
+                        <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:1 }}>
+                          <span style={{ fontSize:11, color:T.hint }}>#{p.cod}</span>
+                          {linhasMap[p.cod] && (
+                            <span style={{ fontSize:10, fontWeight:600, color:cor,
+                              background:cor+"18", padding:"1px 7px", borderRadius:8 }}>
+                              {linhasMap[p.cod]}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {on && <span style={{ fontSize:10, fontWeight:700, color:"#F59E0B" }}>⚠ alerta</span>}
+                    </div>
+                  );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <div style={{ padding:"16px 24px", borderTop:`1px solid ${T.borderL}`,
           display:"flex", alignItems:"center", justifyContent:"space-between",
           background:"#FAFBFF" }}>
           <span style={{ fontSize:12, color:T.sub }}>
-            {selecionados.size} produto{selecionados.size!==1?"s":""} na sua grade
+            {aba === "grade"
+              ? `${selecionados.size} produto${selecionados.size!==1?"s":""} na sua grade`
+              : (
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontSize:12, color:T.sub }}>
+                    {alertaLocal.size} produto{alertaLocal.size!==1?"s":""} no alerta
+                  </span>
+                  {alertaLocal.size > 0 && (
+                    <button onClick={() => setAlertaLocal(new Set())}
+                      style={{ fontSize:11, fontWeight:600, cursor:"pointer", border:"none",
+                        borderRadius:8, padding:"4px 10px", background:"#FEE2E2", color:"#991B1B" }}>
+                      Remover todos
+                    </button>
+                  )}
+                </div>
+              )}
           </span>
           <div style={{ display:"flex", gap:10 }}>
             <button onClick={onClose}
@@ -608,7 +760,7 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose }) {
               style={{ padding:"9px 22px", fontSize:13, fontWeight:700, cursor:"pointer",
                 border:"none", borderRadius:10, background:T.mint, color:T.navy,
                 boxShadow:`0 4px 14px rgba(0,201,167,0.35)` }}>
-              Salvar grade
+              Salvar
             </button>
           </div>
         </div>
@@ -1447,61 +1599,67 @@ function saveGeoCache(cache) {
 }
 
 function MapsTab({ rows, meusCodigos, meus }) {
-  const [coordsMap, setCoordsMap] = useState({}); // cidade+uf -> {lat,lng} | "loading" | "error"
+  const [coordsMap, setCoordsMap] = useState({});
   const cacheRef = useRef(getGeoCache());
   const mapDivRef = useRef(null);
   const leafletMapRef = useRef(null);
   const [leafletReady, setLeafletReady] = useState(!!window.L);
 
-  // Carrega Leaflet via CDN se ainda não estiver disponível
   useEffect(() => {
     if (window.L) { setLeafletReady(true); return; }
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
     document.head.appendChild(link);
-
     const script = document.createElement("script");
     script.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
     script.onload = () => setLeafletReady(true);
     document.head.appendChild(script);
+    return () => {
+      if (leafletMapRef.current) {
+        try { leafletMapRef.current.remove(); } catch {}
+        leafletMapRef.current = null;
+      }
+    };
   }, []);
 
-  // Lista de cidades+UF únicas presentes na planilha atual
-  const cidadesBrutas = useMemo(() => {
-    const base = rows.filter(r => meus ? meusCodigos.has(Number(r.codProduto)) : true);
+  // Cidades únicas com total de lojas
+  const cidades = useMemo(() => {
     const map = new Map();
-    base.forEach(r => {
+    rows.forEach(r => {
       if (!r.cidade) return;
-      const key = `${r.cidade}|${r.uf||""}`;
-      if (!map.has(key)) map.set(key, { cidade:r.cidade, uf:r.uf||"", filiais:new Set() });
+      const key = r.cidade.toUpperCase();
+      if (!map.has(key)) map.set(key, { cidade: r.cidade, uf: r.uf || "", filiais: new Set() });
       map.get(key).filiais.add(r.filial);
     });
     return [...map.values()]
-      .map(v => ({ cidade:v.cidade, uf:v.uf, totalLojas:v.filiais.size,
-        key:`${v.cidade.toUpperCase()}|${v.uf.toUpperCase()}` }))
-      .sort((a,b) => b.totalLojas - a.totalLojas);
-  }, [rows, meusCodigos, meus]);
+      .map(v => ({
+        cidade: v.cidade,
+        uf: v.uf,
+        totalLojas: v.filiais.size,
+        key: v.cidade.toUpperCase(),
+        coord: CIDADE_COORDS[v.cidade.toUpperCase()] || null,
+      }))
+      .sort((a, b) => b.totalLojas - a.totalLojas);
+  }, [rows]);
 
-  // Geocoding automático: busca coordenadas para cidades desconhecidas
+  // Para cidades não mapeadas, busca via Nominatim
   useEffect(() => {
     let cancelled = false;
+    const semCoord = cidades.filter(c => !c.coord && !cacheRef.current[c.key]);
 
-    async function geocodeUma(item) {
-      const { key, cidade, uf } = item;
-      if (CIDADE_COORDS[key.split("|")[0]]) return CIDADE_COORDS[key.split("|")[0]];
-      if (cacheRef.current[key]) return cacheRef.current[key];
-
+    async function geocodeCidade(item) {
+      if (cacheRef.current[item.key]) return cacheRef.current[item.key];
       try {
-        const query = encodeURIComponent(`${cidade}, ${uf}, Brasil`);
+        const q = encodeURIComponent(`${item.cidade}, ${item.uf}, Brasil`);
         const resp = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${query}&format=json&limit=1&countrycodes=br`,
+          `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&countrycodes=br`,
           { headers: { "Accept-Language": "pt-BR" } }
         );
         const data = await resp.json();
         if (data && data[0]) {
           const coord = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-          cacheRef.current[key] = coord;
+          cacheRef.current[item.key] = coord;
           saveGeoCache(cacheRef.current);
           return coord;
         }
@@ -1509,177 +1667,129 @@ function MapsTab({ rows, meusCodigos, meus }) {
       return null;
     }
 
-    async function processarTodas() {
-      for (const item of cidadesBrutas) {
+    async function processar() {
+      for (const item of semCoord) {
         if (cancelled) return;
-        if (coordsMap[item.key] && coordsMap[item.key] !== "loading") continue;
         setCoordsMap(prev => ({ ...prev, [item.key]: "loading" }));
-        const coord = await geocodeUma(item);
+        const coord = await geocodeCidade(item);
         if (cancelled) return;
         setCoordsMap(prev => ({ ...prev, [item.key]: coord || "error" }));
         await new Promise(r => setTimeout(r, 1100));
       }
     }
-
-    if (cidadesBrutas.length > 0) processarTodas();
+    if (semCoord.length > 0) processar();
     return () => { cancelled = true; };
-  }, [cidadesBrutas]);
+  }, [cidades]);
 
-  // Junta dados + coordenadas resolvidas
-  const dados = useMemo(() => cidadesBrutas.map(item => {
-    const c = coordsMap[item.key];
-    return {
-      cidade: item.cidade,
-      uf: item.uf,
-      totalLojas: item.totalLojas,
-      coord: (c && c !== "loading" && c !== "error") ? c : null,
-      carregando: c === "loading" || c === undefined,
-    };
-  }), [cidadesBrutas, coordsMap]);
+  // Resolve coordenadas: fixa > cache > geocoding
+  const dadosComCoord = useMemo(() => cidades.map(c => {
+    const coord = c.coord || (coordsMap[c.key] && coordsMap[c.key] !== "loading" && coordsMap[c.key] !== "error"
+      ? coordsMap[c.key] : null);
+    return { ...c, coord, carregando: !c.coord && coordsMap[c.key] === "loading" };
+  }), [cidades, coordsMap]);
 
-  const comCoord = dados.filter(d => d.coord);
-  const carregandoAlgum = dados.some(d => d.carregando);
-  const maxLojas = Math.max(...dados.map(d => d.totalLojas), 1);
+  const comCoord = dadosComCoord.filter(d => d.coord);
+  const maxLojas = Math.max(...dadosComCoord.map(d => d.totalLojas), 1);
 
-  // Cria/atualiza o mapa Leaflet com TODOS os pinos de uma vez
+  // Renderiza pinos no Leaflet
   useEffect(() => {
     if (!leafletReady || !mapDivRef.current || comCoord.length === 0) return;
     const L = window.L;
 
-    // Cria o mapa uma única vez
     if (!leafletMapRef.current) {
-      leafletMapRef.current = L.map(mapDivRef.current, {
-        zoomControl: true, scrollWheelZoom: true,
-      });
+      leafletMapRef.current = L.map(mapDivRef.current, { zoomControl: true, scrollWheelZoom: true });
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '© OpenStreetMap',
-        maxZoom: 18,
+        attribution: "© OpenStreetMap", maxZoom: 18,
       }).addTo(leafletMapRef.current);
       leafletMapRef.current._markersLayer = L.layerGroup().addTo(leafletMapRef.current);
     }
 
     const map = leafletMapRef.current;
     map._markersLayer.clearLayers();
-
     const bounds = [];
+
     comCoord.forEach(({ cidade, uf, totalLojas, coord }) => {
       bounds.push([coord.lat, coord.lng]);
-      const size = 28 + (totalLojas / maxLojas) * 18;
-
+      const size = 30 + (totalLojas / maxLojas) * 20;
       const icon = L.divIcon({
         className: "",
         html: `
           <div style="display:flex;flex-direction:column;align-items:center;transform:translateY(-100%);">
-            <div style="background:#fff;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;
-              color:#0D1F5C;margin-bottom:4px;box-shadow:0 2px 8px rgba(10,15,30,0.25);white-space:nowrap;
-              font-family:'Inter','Segoe UI',sans-serif;">
-              ${cidade}${uf?" · "+uf:""} · ${totalLojas} loja${totalLojas!==1?"s":""}
+            <div style="background:#fff;border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700;
+              color:#0D1F5C;margin-bottom:4px;box-shadow:0 2px 8px rgba(10,15,30,0.2);
+              white-space:nowrap;font-family:'Inter','Segoe UI',sans-serif;">
+              ${cidade} · ${totalLojas} loja${totalLojas !== 1 ? "s" : ""}
             </div>
-            <svg width="${size}" height="${size*1.3}" viewBox="0 0 24 32" style="filter:drop-shadow(0 3px 6px rgba(13,31,92,0.4));">
-              <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20c0-6.6-5.4-12-12-12z" fill="#1B7FE8"/>
-              <circle cx="12" cy="12" r="5.5" fill="#fff"/>
-              <circle cx="12" cy="12" r="3" fill="#0D1F5C"/>
+            <svg width="${size}" height="${size * 1.3}" viewBox="0 0 24 32"
+              style="filter:drop-shadow(0 3px 6px rgba(13,31,92,0.4));">
+              <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20C24 5.4 18.6 0 12 0z" fill="#1B7FE8"/>
+              <circle cx="12" cy="12" r="5" fill="#fff"/>
+              <circle cx="12" cy="12" r="2.8" fill="#0D1F5C"/>
             </svg>
           </div>`,
-        iconSize: [size, size*1.3],
-        iconAnchor: [size/2, size*1.3],
+        iconSize: [size, size * 1.3],
+        iconAnchor: [size / 2, size * 1.3],
       });
-
       L.marker([coord.lat, coord.lng], { icon }).addTo(map._markersLayer);
     });
 
-    // Ajusta o zoom para enquadrar todos os pinos de uma vez
-    if (bounds.length === 1) {
-      map.setView(bounds[0], 12);
-    } else if (bounds.length > 1) {
-      map.fitBounds(bounds, { padding: [50, 50] });
-    }
-
-    // Corrige bug de renderização do Leaflet quando o container muda de tamanho
+    if (bounds.length === 1) map.setView(bounds[0], 12);
+    else if (bounds.length > 1) map.fitBounds(bounds, { padding: [60, 60] });
     setTimeout(() => map.invalidateSize(), 100);
   }, [leafletReady, comCoord, maxLojas]);
 
   return (
     <div style={{ display:"flex", gap:16, flexWrap:"wrap" }}>
-      {/* Mapa real com todos os pinos */}
-      <div style={{ flex:"2 1 480px", minWidth:320,
-        borderRadius:16, border:`1px solid ${T.borderL}`,
-        position:"relative", height:460, overflow:"hidden",
+      {/* Mapa */}
+      <div style={{ flex:"2 1 480px", minWidth:320, borderRadius:16,
+        border:`1px solid ${T.borderL}`, height:460, overflow:"hidden",
         boxShadow:"0 2px 12px rgba(10,15,30,0.06)", background:"#EAF2FF" }}>
-
-        <style>{"@keyframes spin { to { transform: rotate(360deg); } } .leaflet-control-attribution { font-size: 9px !important; }"}</style>
-
+        <style>{"@keyframes spin{to{transform:rotate(360deg)}} .leaflet-control-attribution{font-size:9px!important}"}</style>
         <div ref={mapDivRef} style={{ width:"100%", height:"100%",
           display: comCoord.length > 0 ? "block" : "none" }}/>
-
-        {comCoord.length === 0 && carregandoAlgum && (
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-            height:"100%", color:"#64748B", fontSize:13, textAlign:"center", padding:24, gap:10 }}>
+        {comCoord.length === 0 && (
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center",
+            justifyContent:"center", height:"100%", gap:10, color:"#64748B", fontSize:13 }}>
             <div style={{ width:24, height:24, border:"3px solid #CBD5E8",
               borderTopColor:"#1B7FE8", borderRadius:"50%",
               animation:"spin 0.8s linear infinite" }}/>
-            Localizando cidades no mapa...
-          </div>
-        )}
-        {comCoord.length === 0 && !carregandoAlgum && (
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
-            height:"100%", color:"#64748B", fontSize:13, textAlign:"center", padding:24 }}>
-            Não foi possível localizar as cidades desta planilha.
+            Carregando mapa...
           </div>
         )}
       </div>
 
       {/* Lista lateral */}
-      <div style={{ flex:"1 1 260px", minWidth:240 }}>
+      <div style={{ flex:"1 1 240px", minWidth:220 }}>
         <div style={{ background:T.surface, border:`1px solid ${T.borderL}`, borderRadius:16,
           overflow:"hidden", boxShadow:"0 2px 12px rgba(10,15,30,0.06)" }}>
           <div style={{ padding:"14px 18px", borderBottom:`1px solid ${T.borderL}`,
-            display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-            <span style={{ fontSize:12, fontWeight:700, color:T.sub,
-              textTransform:"uppercase", letterSpacing:0.6 }}>
-              {dados.length} cidade{dados.length!==1?"s":""} atendida{dados.length!==1?"s":""}
-            </span>
+            fontSize:11, fontWeight:700, color:T.sub, textTransform:"uppercase", letterSpacing:0.6 }}>
+            {dadosComCoord.length} cidade{dadosComCoord.length !== 1 ? "s" : ""} atendida{dadosComCoord.length !== 1 ? "s" : ""}
           </div>
-          <div>
-            {dados.map(({ cidade, uf, totalLojas, coord, carregando }, i) => (
-              <div key={cidade+uf}
-                style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                  padding:"12px 18px",
-                  borderBottom:i<dados.length-1?`1px solid ${T.borderL}`:"none" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                  {carregando ? (
-                    <div style={{ width:8, height:8, border:"1.5px solid #CBD5E8",
+          {dadosComCoord.map(({ cidade, uf, totalLojas, coord, carregando }, i) => (
+            <div key={cidade} style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+              padding:"12px 18px", borderBottom:i < dadosComCoord.length - 1 ? `1px solid ${T.borderL}` : "none" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                {carregando
+                  ? <div style={{ width:8, height:8, border:"1.5px solid #CBD5E8",
                       borderTopColor:"#1B7FE8", borderRadius:"50%",
                       animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
-                  ) : (
-                    <div style={{ width:8, height:8, borderRadius:"50%",
+                  : <div style={{ width:8, height:8, borderRadius:"50%",
                       background: coord ? "#1B7FE8" : "#CBD5E8", flexShrink:0 }}/>
-                  )}
-                  <span style={{ fontSize:13, fontWeight:600, color:T.text }}>
-                    {cidade}{uf && <span style={{ color:T.hint, fontWeight:400 }}> · {uf}</span>}
-                  </span>
-                </div>
-                <span style={{ fontSize:13, fontWeight:800, color:"#1B7FE8" }}>
-                  {totalLojas}
+                }
+                <span style={{ fontSize:13, fontWeight:600, color:T.text }}>
+                  {cidade}{uf && <span style={{ color:T.hint, fontWeight:400 }}> · {uf}</span>}
                 </span>
               </div>
-            ))}
-            {dados.length === 0 && (
-              <div style={{ padding:"32px 18px", textAlign:"center", color:T.hint, fontSize:13 }}>
-                Nenhuma cidade encontrada.
-              </div>
-            )}
-          </div>
+              <span style={{ fontSize:13, fontWeight:800, color:"#1B7FE8" }}>{totalLojas}</span>
+            </div>
+          ))}
         </div>
-
-        {/* Total geral */}
         <div style={{ marginTop:12, background:"#0D1F5C", borderRadius:16, padding:"16px 18px",
           display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <span style={{ fontSize:12, color:"rgba(255,255,255,0.6)", fontWeight:600 }}>
-            Total de lojas
-          </span>
+          <span style={{ fontSize:12, color:"rgba(255,255,255,0.6)", fontWeight:600 }}>Total de lojas</span>
           <span style={{ fontSize:22, fontWeight:800, color:"#fff" }}>
-            {dados.reduce((a,d)=>a+d.totalLojas,0)}
+            {dadosComCoord.reduce((a, d) => a + d.totalLojas, 0)}
           </span>
         </div>
       </div>
@@ -1687,7 +1797,7 @@ function MapsTab({ rows, meusCodigos, meus }) {
   );
 }
 
-// ─── Modal Atenção aos produtos de Inverno ────────────────────────────────────
+// ─── Modal de alerta de produtos ─────────────────────────────────────────────
 // ─── Modal de seleção de linha após o upload ─────────────────────────────────
 function LinhaSelectorModal({ rows, meusCodigos, linhasMap, onSelect, onClose }) {
   const CORES_LINHA = {
@@ -1799,7 +1909,9 @@ function LinhaSelectorModal({ rows, meusCodigos, linhasMap, onSelect, onClose })
 }
 
 
-function InvernoModal({ dados, onClose }) {
+function InvernoModal({ dados, onClose, linhaAtiva }) {
+  const titulo = linhaAtiva ? `Atenção aos produtos ${linhaAtiva}` : "Atenção aos produtos";
+  const subtitulo = linhaAtiva ? `Estoque consolidado · Linha ${linhaAtiva}` : "Estoque consolidado";
   const total = dados.reduce((a, d) => a + d.estoque, 0);
   return (
     <div style={{ position:"fixed", inset:0, zIndex:1100,
@@ -1823,10 +1935,10 @@ function InvernoModal({ dados, onClose }) {
           </div>
           <div>
             <div style={{ fontWeight:800, fontSize:17, color:"#fff" }}>
-              Atenção aos produtos de Inverno
+              {titulo}
             </div>
             <div style={{ fontSize:12, color:"rgba(255,255,255,0.75)", marginTop:2 }}>
-              Estoque consolidado da linha sazonal
+              {subtitulo}
             </div>
           </div>
         </div>
@@ -1979,6 +2091,7 @@ function App() {
     vendasJun: "Jun/2026", vendasMai: "Mai/2026", vendasJun25: "Jun/2025"
   });
   const [invernoAberto, setInvernoAberto] = useState(false);
+  const [alertaCodigos, setAlertaCodigos] = useState(loadAlertaCodigos);
   const [linhaSelecaoAberta, setLinhaSelecaoAberta] = useState(false);
   const [expandirSinal, setExpandirSinal] = useState(null);
   const [expandirContador, setExpandirContador] = useState(0);
@@ -1991,17 +2104,26 @@ function App() {
   }
 
   const handleData = useCallback((json, name) => {
-    // Detecta os nomes reais das colunas de vendas da planilha
-    if (json.length > 0) {
-      const cols = Object.keys(json[0]);
-      const vendasCols = cols.filter(c => c.startsWith("Vendas") && !c.startsWith("% Vendas"));
-      // Ordem esperada: Vendas Jun. (anterior), Vendas Mai. (mês anterior), Vendas Jun/2025 (atual)
-      setColLabels({
-        vendasJun:   vendasCols[0] ? vendasCols[0].replace("Vendas ","") : "Col. 1",
-        vendasMai:   vendasCols[1] ? vendasCols[1].replace("Vendas ","") : "Col. 2",
-        vendasJun25: vendasCols[2] ? vendasCols[2].replace("Vendas ","") : "Col. 3",
-      });
-    }
+    if (json.length === 0) return;
+
+    // Lê os nomes REAIS das colunas O (14), P (15), Q (16) pela POSIÇÃO — não pelo nome fixo
+    const colsKeys = Object.keys(json[0]);
+    const nomeColO = colsKeys[14] || "Vendas O";   // índice 14 = coluna O
+    const nomeColP = colsKeys[15] || "Vendas P";   // índice 15 = coluna P
+    const nomeColQ = colsKeys[16] || "Vendas Q";   // índice 16 = coluna Q
+
+    // Percentuais: S (18), T (19), U (20)
+    const nomeColS = colsKeys[18] || "";
+    const nomeColT = colsKeys[19] || "";
+    const nomeColU = colsKeys[20] || "";
+
+    // Atualiza os labels exibidos nas colunas — usa o nome real da planilha
+    setColLabels({
+      vendasJun:   nomeColO,
+      vendasMai:   nomeColP,
+      vendasJun25: nomeColQ,
+    });
+
     const mapped = json.map(r => ({
       // Campos de identificação da filial
       codFilial:   r["Cod. Filial"]??"",
@@ -2019,31 +2141,31 @@ function App() {
       preco:       Number(r["Preço"]||r["Preco"]||0),
       estoque:     Number(r["Estoque"]||0),
       situacao:    String(r["Situação Estoque"]||r["Situacao Estoque"]||""),
-      // Campos de vendas
-      vendasJun:   Number(r["Vendas Jun."]||0),
-      vendasMai:   Number(r["Vendas Mai."]||0),
-      vendasJun25: Number(r["Vendas Jun/2025"]||0),
+      // Campos de vendas — lidos pelo nome real da coluna (dinâmico por posição)
+      vendasJun:   Number(r[nomeColO]||0),
+      vendasMai:   Number(r[nomeColP]||0),
+      vendasJun25: Number(r[nomeColQ]||0),
       mediaTrim:   Number(r["Venda média Trim. fechado"]||0),
-      // Percentuais
-      pctMai:      Number(r["% Vendas Mai."]||0),
-      pctJun25:    Number(r["% Vendas Jun/2025"]||0),
-      pctTrim:     Number(r["% Venda média Trim. fechado"]||0),
+      // Percentuais — também dinâmicos
+      pctMai:      Number(r[nomeColS]||0),
+      pctJun25:    Number(r[nomeColT]||0),
+      pctTrim:     Number(r[nomeColU]||0),
     }));
     setRows(mapped);
     setFileName(name||"");
     setProdSel([]); setFilialF([]); setSitF([]); setCidadeF([]); setProdAberto(null);
     setLinhaAtiva(null);
 
-    // Calcula estoque total dos produtos sazonais de inverno
-    const setInverno = new Set(CODIGOS_INVERNO);
+    // Calcula estoque total dos produtos configurados no alerta
+    const alertaSet = loadAlertaCodigos();
     const map = new Map();
     mapped.forEach(r => {
       const cod = Number(r.codProduto);
-      if (!setInverno.has(cod)) return;
+      if (!alertaSet.has(cod)) return;
       if (!map.has(cod)) map.set(cod, { codProduto: cod, produto: r.produto, estoque: 0 });
       map.get(cod).estoque += r.estoque;
     });
-    const lista = CODIGOS_INVERNO.map(cod => map.get(cod) || { codProduto: cod, produto: "(não encontrado na planilha)", estoque: 0 });
+    const lista = [...alertaSet].map(cod => map.get(cod) || { codProduto: cod, produto: "(não encontrado na planilha)", estoque: 0 });
     setInvernoDados(lista);
 
     // Abre primeiro o popup de seleção de linha; o de inverno aparece ao fechá-lo
@@ -2240,9 +2362,24 @@ function App() {
               letterSpacing:-0.5 }}>
               Bem-vindo ao seu painel
             </h1>
-            <p style={{ color:"rgba(255,255,255,0.4)", fontSize:14, margin:0 }}>
+            <p style={{ color:"rgba(255,255,255,0.4)", fontSize:14, margin:"0 0 16px" }}>
               Carregue a planilha da rede para começar
             </p>
+            <a href="https://youtu.be/wN1Qp4MIPiM?is=ntqs1IUQBOanMG2w"
+              target="_blank" rel="noopener noreferrer"
+              style={{ display:"inline-flex", alignItems:"center", gap:8,
+                background:"rgba(255,0,0,0.18)", border:"1px solid rgba(255,80,80,0.35)",
+                borderRadius:20, padding:"8px 18px", textDecoration:"none",
+                color:"#ff6b6b", fontSize:13, fontWeight:600,
+                transition:"all 0.2s" }}
+              onMouseEnter={e=>{ e.currentTarget.style.background="rgba(255,0,0,0.3)"; e.currentTarget.style.borderColor="rgba(255,80,80,0.6)"; }}
+              onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,0,0,0.18)"; e.currentTarget.style.borderColor="rgba(255,80,80,0.35)"; }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="#ff4444">
+                <path d="M22.54 6.42a2.78 2.78 0 00-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46A2.78 2.78 0 001.46 6.42 29 29 0 001 12a29 29 0 00.46 5.58A2.78 2.78 0 003.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 001.95-1.95A29 29 0 0023 12a29 29 0 00-.46-5.58z"/>
+                <polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" fill="white"/>
+              </svg>
+              Como usar a plataforma — Tutorial em vídeo
+            </a>
           </div>
 
           {/* Guia passo a passo */}
@@ -2307,6 +2444,9 @@ function App() {
           meusCodigos={meusCodigos}
           onSave={novos => { setMeusCodigos(novos); setLinhaAtiva(null); }}
           onClose={() => setConfigAberto(false)}
+          alertaCodigos={alertaCodigos}
+          onSaveAlerta={novos => { setAlertaCodigos(novos); saveAlertaCodigos(novos); }}
+          linhaAtiva={linhaAtiva}
         />
       )}
 
@@ -2341,9 +2481,9 @@ function App() {
         />
       )}
 
-      {/* Pop-up Atenção aos produtos de Inverno */}
+      {/* Pop-up de alerta de produtos */}
       {invernoAberto && (
-        <InvernoModal dados={invernoDados} onClose={() => setInvernoAberto(false)} />
+        <InvernoModal dados={invernoDados} linhaAtiva={linhaAtiva} onClose={() => setInvernoAberto(false)} />
       )}
 
       {/* ── Sidebar ── */}
@@ -2751,8 +2891,10 @@ function App() {
                   const cabecalho = [
                     "Cod. Filial","Filial","Endereço","Número","Bairro","CEP","Cidade","UF",
                     "Cod. Produto","Produto","Linha","Preço","Estoque",
-                    "Situação Estoque","Vendas Jun.","Vendas Mai.","Vendas Jun/2025",
-                    "Venda média Trim. fechado","% Vendas Mai.","% Vendas Jun/2025",
+                    "Situação Estoque",
+                    colLabels.vendasJun, colLabels.vendasMai, colLabels.vendasJun25,
+                    "Venda média Trim. fechado",
+                    "% "+colLabels.vendasMai, "% "+colLabels.vendasJun25,
                     "% Venda média Trim. fechado",
                   ];
 
