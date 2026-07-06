@@ -1467,14 +1467,15 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
             <thead>
               <tr style={{ background:"#FAFBFF" }}>
                 {[
-                  { h:"Código",              key:"codProduto", num:true  },
-                  { h:"Produto",             key:"produto",    num:false },
-                  { h:"Estoque",             key:"estoque",    num:true  },
-                  { h:"Situação",            key:"situacao",   num:false },
-                  { h:colLabels.vendasJun,   key:"vendasJun",  num:true  },
-                  { h:colLabels.vendasMai,   key:"vendasMai",  num:true  },
-                  { h:"Média Trim.",         key:"mediaTrim",  num:true  },
-                  { h:"Preço",               key:"preco",      num:true  },
+                  { h:"Código",              key:"codProduto",   num:true  },
+                  { h:"Produto",             key:"produto",      num:false },
+                  { h:"Estoque",             key:"estoque",      num:true  },
+                  { h:"Dias de Estoque",     key:"diasEstoque",  num:true  },
+                  { h:"Situação",            key:"situacao",     num:false },
+                  { h:colLabels.vendasJun,   key:"vendasJun",    num:true  },
+                  { h:colLabels.vendasMai,   key:"vendasMai",    num:true  },
+                  { h:"Média Trim.",         key:"mediaTrim",    num:true  },
+                  { h:"Preço",               key:"preco",        num:true  },
                 ].map(({ h, key }) => {
                   const active = sortFilial === key;
                   return (
@@ -1511,6 +1512,21 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
                     overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={r.produto}>{r.produto}</td>
                   <td style={{ padding:"9px 14px", textAlign:"center", fontWeight:800,
                     color:r.estoque===0?T.coral:T.text }}>{r.estoque}</td>
+                  {/* Dias de Estoque por filial */}
+                  {(() => {
+                    const dias = r.vendasMai === 0 ? 0 : Math.round(r.estoque / (r.vendasMai / 30));
+                    const info = diasEstoqueInfo(dias);
+                    return (
+                      <td style={{ padding:"9px 14px", textAlign:"center" }}
+                        title={dias === 0 ? "Sem vendas no mês — Crítico" : `${dias} dias de estoque — ${info.label}`}>
+                        <span style={{ display:"inline-block", fontWeight:700, fontSize:11,
+                          color: info.cor, background: info.bg,
+                          borderRadius:8, padding:"2px 7px", whiteSpace:"nowrap" }}>
+                          {info.icon} {dias === 0 ? "0d" : `${dias}d`}
+                        </span>
+                      </td>
+                    );
+                  })()}
                   <td style={{ padding:"9px 14px" }}><Badge sit={r.situacao}/></td>
                   <td style={{ padding:"9px 14px", textAlign:"center", color:T.sub }}>{r.vendasJun}</td>
                   <td style={{ padding:"9px 14px", textAlign:"center", color:T.sub }}>{r.vendasMai}</td>
@@ -2070,6 +2086,15 @@ function RankingLojasProduto({ produto, codProduto, rows, meusCodigos, meus, col
   );
 }
 
+// ─── Helper: cor e label para Dias de Estoque ────────────────────────────────
+function diasEstoqueInfo(dias) {
+  if (dias === 0)        return { cor:"#DC2626", bg:"#FEE2E2", label:"Crítico",        icon:"🔴" };
+  if (dias <= 15)        return { cor:"#DC2626", bg:"#FEE2E2", label:"Crítico",        icon:"🔴" };
+  if (dias <= 30)        return { cor:"#F59E0B", bg:"#FEF3C7", label:"Risco Ruptura",  icon:"🟡" };
+  if (dias <= 60)        return { cor:"#10B981", bg:"#D1FAE5", label:"Saudável",       icon:"🟢" };
+  return                        { cor:"#6366F1", bg:"#EDE9FE", label:"Excesso",        icon:"🔵" };
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
   const [rows, setRows]   = useState([]);
@@ -2219,10 +2244,12 @@ function App() {
       g.mediaTrim  += r.mediaTrim;
     });
 
-    // 3. Calcula situação consolidada sobre o estoque TOTAL
+    // 3. Calcula situação consolidada + Dias de Estoque
+    // Fórmula: SE(P=0; 0; M / (P/30))  →  vendasMai=P, estoque=M
     const SO = { Falta:0, Excesso:1, Regular:2 };
     let items = [...map.values()].map(g => ({
       ...g,
+      diasEstoque: g.vendasMai === 0 ? 0 : Math.round(g.estoque / (g.vendasMai / 30)),
       situacaoConsolidada: g.estoque < 20 ? "Falta" : g.estoque <= 100 ? "Regular" : "Excesso",
     }));
 
@@ -2292,6 +2319,7 @@ function App() {
     { label:"Linha",           col:"linha" },
     { label:"Preço",           col:"preco" },
     { label:"Estoque",         col:"estoque" },
+    { label:"Dias de Estoque", col:"diasEstoque" },
     { label:"Situação",        col:"situacao" },
     { label:colLabels.vendasJun,   col:"vendasJun" },
     { label:colLabels.vendasMai,   col:"vendasMai" },
@@ -2398,21 +2426,44 @@ function App() {
               { n:4, text:"Salve a planilha no seu computador" },
               { n:5, text:"Importe a planilha abaixo neste painel" },
             ].map(({ n, text }) => (
-              <div key={n} style={{ display:"flex", alignItems:"flex-start", gap:12,
-                marginBottom: n < 5 ? 12 : 0 }}>
-                <div style={{ width:24, height:24, borderRadius:"50%", flexShrink:0,
-                  background: n===5 ? "#1B7FE8" : "rgba(255,255,255,0.07)",
-                  border: n===5 ? "none" : "1px solid rgba(255,255,255,0.12)",
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  fontSize:11, fontWeight:800,
-                  color: n===5 ? "#fff" : "rgba(255,255,255,0.4)" }}>
-                  {n}
+              <div key={n}>
+                <div style={{ display:"flex", alignItems:"flex-start", gap:12,
+                  marginBottom: n < 5 ? 8 : 0 }}>
+                  <div style={{ width:24, height:24, borderRadius:"50%", flexShrink:0,
+                    background: n===5 ? "#1B7FE8" : "rgba(255,255,255,0.07)",
+                    border: n===5 ? "none" : "1px solid rgba(255,255,255,0.12)",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    fontSize:11, fontWeight:800,
+                    color: n===5 ? "#fff" : "rgba(255,255,255,0.4)" }}>
+                    {n}
+                  </div>
+                  <div style={{ paddingTop:3, fontSize:13, lineHeight:1.4,
+                    color: n===5 ? "#fff" : "rgba(255,255,255,0.5)",
+                    fontWeight: n===5 ? 600 : 400 }}>
+                    {text}
+                  </div>
                 </div>
-                <div style={{ paddingTop:3, fontSize:13, lineHeight:1.4,
-                  color: n===5 ? "#fff" : "rgba(255,255,255,0.5)",
-                  fontWeight: n===5 ? 600 : 400 }}>
-                  {text}
-                </div>
+                {n === 1 && (
+                  <div style={{ marginLeft:36, marginBottom:12 }}>
+                    <a href="https://business.farmaciaindiana.com.br/login"
+                      target="_blank" rel="noopener noreferrer"
+                      style={{ display:"inline-flex", alignItems:"center", gap:6,
+                        fontSize:11, fontWeight:600, color:"#4DAAFF",
+                        textDecoration:"none", padding:"4px 10px",
+                        background:"rgba(77,170,255,0.1)",
+                        border:"1px solid rgba(77,170,255,0.25)",
+                        borderRadius:8, transition:"all 0.15s" }}
+                      onMouseEnter={e=>{ e.currentTarget.style.background="rgba(77,170,255,0.2)"; }}
+                      onMouseLeave={e=>{ e.currentTarget.style.background="rgba(77,170,255,0.1)"; }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
+                        <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                      </svg>
+                      business.farmaciaindiana.com.br
+                    </a>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -2801,6 +2852,22 @@ function App() {
                               fontSize:15, color:r.estoque===0?T.coral:T.text }}>
                               {r.estoque}
                             </td>
+                            {/* Dias de Estoque = SE(P=0;0;M/(P/30)) */}
+                            {(() => {
+                              const info = diasEstoqueInfo(r.diasEstoque);
+                              return (
+                                <td style={{ padding:"10px 14px", textAlign:"center" }}
+                                  title={r.diasEstoque === 0
+                                    ? "Sem vendas no mês — Crítico"
+                                    : `${r.diasEstoque} dias de estoque — ${info.label}`}>
+                                  <span style={{ display:"inline-block", fontWeight:700, fontSize:12,
+                                    color: info.cor, background: info.bg,
+                                    borderRadius:10, padding:"3px 8px", whiteSpace:"nowrap" }}>
+                                    {info.icon} {r.diasEstoque === 0 ? "0d" : `${r.diasEstoque}d`}
+                                  </span>
+                                </td>
+                              );
+                            })()}
                             <td style={{ padding:"10px 14px" }}><Badge sit={r.situacaoConsolidada}/></td>
                             <td style={{ padding:"10px 14px", textAlign:"center",
                               color:T.sub, fontSize:12 }}>{r.vendasJun}</td>
