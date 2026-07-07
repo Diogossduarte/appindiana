@@ -202,10 +202,13 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, o
     const c = {};
     LINHAS_PRODUTO.forEach(l => c[l] = []);
     c["Sem linha"] = [];
+    // Conta TODOS os produtos mapeados no LINHAS_FIXAS, não só os da planilha atual
+    Object.entries(linhasMap).forEach(([cod, linha]) => {
+      if (c[linha]) c[linha].push(Number(cod));
+    });
+    // Produtos da planilha sem linha associada
     todosProdutos.forEach(p => {
-      const l = linhasMap[p.cod];
-      if (l && c[l]) c[l].push(p.cod);
-      else c["Sem linha"].push(p.cod);
+      if (!linhasMap[p.cod]) c["Sem linha"].push(p.cod);
     });
     return c;
   }, [todosProdutos, linhasMap]);
@@ -349,7 +352,8 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, o
         </div>
 
         {/* ─── ABA: MINHA GRADE ─── */}
-        {aba === "grade" && (<>
+        {aba === "grade" && (
+        <div style={{ display:"flex", flexDirection:"column", flex:1, overflow:"hidden" }}>
 
         {/* Linhas de produto — cards com ação clara */}
         <div style={{ padding:"16px 24px", borderBottom:`1px solid ${T.borderL}`, background:"#FAFBFF" }}>
@@ -624,7 +628,7 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, o
           })}
         </div>
 
-        </>)}
+        </div>)}
 
         {/* ─── ABA: CONFIGURAR ALERTA ─── */}
         {aba === "alerta" && (
