@@ -1477,15 +1477,15 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
             <thead>
               <tr style={{ background:"#FAFBFF" }}>
                 {[
-                  { h:"Código",              key:"codProduto",   num:true  },
-                  { h:"Produto",             key:"produto",      num:false },
-                  { h:"Estoque",             key:"estoque",      num:true  },
-                  { h:"Dias de Estoque",     key:"diasEstoque",  num:true  },
-                  { h:"Situação",            key:"situacao",     num:false },
+                  { h:"Código",          key:"codProduto",   num:true  },
+                  { h:"Produto",         key:"produto",      num:false },
+                  { h:"Estoque",         key:"estoque",      num:true  },
+                  { h:"Dias de Estoque", key:"diasEstoque",  num:true  },
+                  { h:"Situação",        key:"situacao",     num:false },
                   { h:colLabels.vendasJun,   key:"vendasJun",    num:true  },
                   { h:colLabels.vendasMai,   key:"vendasMai",    num:true  },
-                  { h:"Média Trim.",         key:"mediaTrim",    num:true  },
-                  { h:"Preço",               key:"preco",        num:true  },
+                  { h:"Média Trim.",     key:"mediaTrim",    num:true  },
+                  { h:"Preço",           key:"preco",        num:true  },
                 ].map(({ h, key }) => {
                   const active = sortFilial === key;
                   return (
@@ -2236,6 +2236,7 @@ function App() {
       if (linhaAtiva && linhasMap[Number(r.codProduto)] !== linhaAtiva) return false;
       if (prodSel.length>0 && !prodSel.includes(r.produto)) return false;
       if (cidadeF.length>0 && !cidadeF.includes(r.cidade)) return false;
+      if (filialF.length>0 && !filialF.includes(r.filial)) return false;
       return true;
     });
 
@@ -2279,7 +2280,7 @@ function App() {
     });
 
     return items;
-  }, [rows, meusCodigos, linhaAtiva, linhasMap, prodSel, sitF, cidadeF, sortCol, sortDir]);
+  }, [rows, meusCodigos, linhaAtiva, linhasMap, prodSel, sitF, cidadeF, filialF, sortCol, sortDir]);
 
   const porFilial = useMemo(() => {
     const base = rows.filter(r => {
@@ -2325,7 +2326,6 @@ function App() {
   const COLS = [
     { label:"Código",          col:"codProduto" },
     { label:"Produto",         col:"produto" },
-    { label:"Linha",           col:"linha" },
     { label:"Preço",           col:"preco" },
     { label:"Estoque",         col:"estoque" },
     { label:"Dias de Estoque", col:"diasEstoque" },
@@ -2852,16 +2852,13 @@ function App() {
                                 textDecoration:"underline" }} title={r.produto}>
                               {r.produto}
                             </td>
-
-                            <td style={{ padding:"10px 14px", color:T.hint, fontSize:11,
-                              whiteSpace:"nowrap" }}>{r.linha}</td>
                             <td style={{ padding:"10px 14px", whiteSpace:"nowrap", fontWeight:600 }}>
                               {r.preco.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td>
                             <td style={{ padding:"10px 14px", textAlign:"center", fontWeight:800,
                               fontSize:15, color:r.estoque===0?T.coral:T.text }}>
                               {r.estoque}
                             </td>
-                            {/* Dias de Estoque = SE(P=0;0;M/(P/30)) */}
+                            {/* Dias de Estoque */}
                             {(() => {
                               const info = diasEstoqueInfo(r.diasEstoque);
                               return (
@@ -2882,12 +2879,10 @@ function App() {
                               color:T.sub, fontSize:12 }}>{r.vendasJun}</td>
                             <td style={{ padding:"10px 14px", textAlign:"center",
                               color:T.sub, fontSize:12 }}>{r.vendasMai}</td>
-                            {/* Jun/2025 com destaque */}
                             <td style={{ padding:"10px 14px", textAlign:"center" }}>
                               <span style={{ fontWeight:800, fontSize:14,
                                 color:trendUp?T.mint:T.coral }}>{r.vendasJun25}</span>
                             </td>
-                            {/* Sparkline + média */}
                             <td style={{ padding:"10px 14px", textAlign:"center" }}>
                               <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"center" }}>
                                 <Spark values={spark} color={trendUp?T.mint:T.coral}/>
