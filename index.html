@@ -2219,6 +2219,18 @@ function App() {
   const filiais = useMemo(() =>
     [...new Set(rows.map(r=>r.filial).filter(Boolean))].sort(), [rows]);
 
+  // Lojas filtradas pelos filtros ativos — usado no KPI "Total de lojas"
+  const filiaisFiltradas = useMemo(() => {
+    const base = rows.filter(r => {
+      if (!meusCodigos.has(Number(r.codProduto))) return false;
+      if (linhaAtiva && linhasMap[Number(r.codProduto)] !== linhaAtiva) return false;
+      if (cidadeF.length>0 && !cidadeF.includes(r.cidade)) return false;
+      if (filialF.length>0 && !filialF.includes(r.filial)) return false;
+      return true;
+    });
+    return [...new Set(base.map(r=>r.filial).filter(Boolean))];
+  }, [rows, meusCodigos, linhaAtiva, linhasMap, cidadeF, filialF]);
+
   const cidades = useMemo(() =>
     [...new Set(rows.map(r=>r.cidade).filter(Boolean))].sort(), [rows]);
 
@@ -2589,88 +2601,137 @@ function App() {
             </button>
           ))}
 
-          {/* Engrenagem — configuração da grade */}
-          <div style={{ marginTop:20, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:16 }}>
-            <button onClick={()=>setConfigAberto(true)}
-              style={{ display:"flex", alignItems:"center", gap:10, width:"100%",
-                padding:"9px 12px", borderRadius:10, border:"none", cursor:"pointer",
-                background:"transparent", color:"rgba(255,255,255,0.4)",
-                fontSize:13, fontWeight:400, transition:"all 0.2s", textAlign:"left" }}
-              onMouseEnter={e=>{ e.currentTarget.style.background="rgba(255,255,255,0.06)"; e.currentTarget.style.color="rgba(255,255,255,0.85)"; }}
-              onMouseLeave={e=>{ e.currentTarget.style.background="transparent"; e.currentTarget.style.color="rgba(255,255,255,0.4)"; }}>
-              {/* SVG engrenagem */}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-                style={{ flexShrink:0 }}>
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
-              </svg>
-              <div>
-                <div style={{ lineHeight:1.2 }}>Minha grade</div>
-                <div style={{ fontSize:10, color:"rgba(255,255,255,0.25)", marginTop:2 }}>
-                  {meusCodigos.size} produto{meusCodigos.size!==1?"s":""}
-                </div>
-              </div>
-            </button>
-          </div>
         </nav>
 
-        {/* Filtros na sidebar */}
-        <div style={{ padding:"12px 12px 20px", borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+        {/* ── Filtros — seção central destacada ── */}
+        <div style={{ flex:1, padding:"16px 12px", overflowY:"auto",
+          borderTop:"1px solid rgba(255,255,255,0.07)" }}>
+
+          {/* Label Filtros */}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-            marginBottom:12 }}>
-            <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", fontWeight:600,
-              letterSpacing:1, textTransform:"uppercase" }}>Filtros</div>
+            marginBottom:14 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                stroke="rgba(255,255,255,0.5)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+              </svg>
+              <span style={{ fontSize:10, color:"rgba(255,255,255,0.5)", fontWeight:700,
+                letterSpacing:1.2, textTransform:"uppercase" }}>Filtros</span>
+            </div>
             {(filialF.length>0 || sitF.length>0 || cidadeF.length>0) && (
               <button onClick={()=>{ setFilialF([]); setSitF([]); setCidadeF([]); }}
-                style={{ background:"none", border:"none", cursor:"pointer",
-                  fontSize:10, color:T.coral, fontWeight:700, padding:0 }}>
-                limpar tudo
+                style={{ background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.3)",
+                  borderRadius:8, cursor:"pointer", fontSize:10, color:"#FCA5A5",
+                  fontWeight:700, padding:"2px 8px" }}>
+                limpar
               </button>
             )}
           </div>
 
-          {/* Filtro de cidade */}
-          <FilialDropdown
-            filiais={cidades}
-            selected={cidadeF}
-            onChange={setCidadeF}
-            titulo="Cidade"
-          />
+          {/* Chips de filtros ativos */}
+          {(cidadeF.length > 0 || filialF.length > 0 || sitF.length > 0) && (
+            <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:12 }}>
+              {cidadeF.map(c => (
+                <span key={c} style={{ display:"inline-flex", alignItems:"center", gap:3,
+                  background:"rgba(77,170,255,0.15)", border:"1px solid rgba(77,170,255,0.3)",
+                  borderRadius:10, padding:"2px 7px", fontSize:10, color:"#93C5FD" }}>
+                  {c}
+                  <button onClick={()=>setCidadeF(cidadeF.filter(x=>x!==c))}
+                    style={{ background:"none", border:"none", cursor:"pointer",
+                      color:"#93C5FD", fontSize:11, lineHeight:1, padding:0 }}>×</button>
+                </span>
+              ))}
+              {filialF.map(f => (
+                <span key={f} style={{ display:"inline-flex", alignItems:"center", gap:3,
+                  background:"rgba(99,102,241,0.15)", border:"1px solid rgba(99,102,241,0.3)",
+                  borderRadius:10, padding:"2px 7px", fontSize:10, color:"#A5B4FC",
+                  maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {f}
+                  <button onClick={()=>setFilialF(filialF.filter(x=>x!==f))}
+                    style={{ background:"none", border:"none", cursor:"pointer",
+                      color:"#A5B4FC", fontSize:11, lineHeight:1, padding:0, flexShrink:0 }}>×</button>
+                </span>
+              ))}
+            </div>
+          )}
 
-          {/* Filtro de filial */}
-          <FilialDropdown
-            filiais={filiais}
-            selected={filialF}
-            onChange={setFilialF}
-            titulo="Filtro por Loja"
-          />
+          {/* Filtro Cidade */}
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)", fontWeight:600,
+              letterSpacing:0.8, textTransform:"uppercase", marginBottom:5 }}>Cidade</div>
+            <FilialDropdown
+              filiais={cidades}
+              selected={cidadeF}
+              onChange={setCidadeF}
+              titulo="Cidade"
+            />
+          </div>
 
-          {/* Filtro de situação */}
-          <MultiCheckFilter
-            label="Situação"
-            options={[
-              { value:"Falta",   label:"Falta" },
-              { value:"Regular", label:"Regular" },
-              { value:"Excesso", label:"Excesso" },
-            ]}
-            selected={sitF}
-            onChange={setSitF}
-            colorMap={{ Falta:"#EF4444", Regular:"#10B981", Excesso:"#EAB308" }}
-          />
+          {/* Filtro Loja */}
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)", fontWeight:600,
+              letterSpacing:0.8, textTransform:"uppercase", marginBottom:5 }}>Loja</div>
+            <FilialDropdown
+              filiais={filiais}
+              selected={filialF}
+              onChange={setFilialF}
+              titulo="Filtro por Loja"
+            />
+          </div>
+
+          {/* Filtro Situação */}
+          <div>
+            <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)", fontWeight:600,
+              letterSpacing:0.8, textTransform:"uppercase", marginBottom:5 }}>Situação</div>
+            <MultiCheckFilter
+              label="Situação"
+              options={[
+                { value:"Falta",   label:"Falta" },
+                { value:"Regular", label:"Regular" },
+                { value:"Excesso", label:"Excesso" },
+              ]}
+              selected={sitF}
+              onChange={setSitF}
+              colorMap={{ Falta:"#EF4444", Regular:"#10B981", Excesso:"#EAB308" }}
+            />
+          </div>
         </div>
 
-        {/* Rodapé da sidebar */}
-        <div style={{ padding:"12px 14px 16px", borderTop:"1px solid rgba(255,255,255,0.06)" }}>
-          <div style={{ fontSize:10, color:"rgba(255,255,255,0.2)", lineHeight:1.6 }}>
-            Dúvidas e sugestões:
+        {/* ── Minha Grade — fixo no rodapé ── */}
+        <div style={{ borderTop:"1px solid rgba(255,255,255,0.07)", padding:"12px" }}>
+          <button onClick={()=>setConfigAberto(true)}
+            style={{ display:"flex", alignItems:"center", gap:10, width:"100%",
+              padding:"10px 12px", borderRadius:12, border:"1px solid rgba(255,255,255,0.12)",
+              cursor:"pointer", background:"rgba(255,255,255,0.05)",
+              transition:"all 0.2s", textAlign:"left" }}
+            onMouseEnter={e=>{ e.currentTarget.style.background="rgba(77,170,255,0.12)"; e.currentTarget.style.borderColor="rgba(77,170,255,0.35)"; }}
+            onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,255,255,0.05)"; e.currentTarget.style.borderColor="rgba(255,255,255,0.12)"; }}>
+            <div style={{ width:32, height:32, borderRadius:8, background:"rgba(77,170,255,0.15)",
+              display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                stroke="#4DAAFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize:13, fontWeight:700, color:"#fff", lineHeight:1.2 }}>Minha grade</div>
+              <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", marginTop:2 }}>
+                {meusCodigos.size} produto{meusCodigos.size!==1?"s":""}
+                {linhaAtiva ? ` · ${linhaAtiva}` : ""}
+              </div>
+            </div>
+          </button>
+
+          {/* Email rodapé */}
+          <div style={{ marginTop:10, paddingTop:10, borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ fontSize:9, color:"rgba(255,255,255,0.2)", marginBottom:2 }}>Sugestões:</div>
+            <a href="mailto:diogossduarte@icloud.com"
+              style={{ fontSize:9, color:"rgba(255,255,255,0.25)", textDecoration:"none",
+                wordBreak:"break-all", lineHeight:1.5, display:"block" }}>
+              diogossduarte@icloud.com
+            </a>
           </div>
-          <a href="mailto:diogossduarte@icloud.com"
-            style={{ fontSize:10, color:"#4DAAFF", textDecoration:"none",
-              wordBreak:"break-all", lineHeight:1.5, display:"block",
-              marginTop:2 }}>
-            diogossduarte@icloud.com
-          </a>
         </div>
 
       </aside>
@@ -2752,8 +2813,8 @@ function App() {
               sub={metrics.naoEncontrados.length>0
                 ? `${metrics.naoEncontrados.length} da grade não encontrado${metrics.naoEncontrados.length!==1?"s":""}`
                 : linhaAtiva ? `linha ${linhaAtiva}` : "meus produtos"}/>
-            <KpiCard label="Total de lojas" value={filiais.length} accent="#1B7FE8" icon="⌂"
-              sub="filiais ativas"/>
+            <KpiCard label="Total de lojas" value={filiaisFiltradas.length} accent="#1B7FE8" icon="⌂"
+              sub={filiaisFiltradas.length === filiais.length ? "filiais ativas" : `de ${filiais.length} no total`}/>
             <KpiCard label="Estoque total" value={metrics.estoque} accent="#6366F1" icon="◫"
               sub="todas as filiais"/>
             <KpiCard label={colLabels.vendasJun} value={metrics.vendasJun} accent={T.amber} icon="◆"
