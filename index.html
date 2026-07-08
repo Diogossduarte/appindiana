@@ -334,9 +334,12 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, o
         {aba === "grade" && (
           <div style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
 
+            {/* Tudo numa área scrollável única */}
+            <div style={{ flex:1, overflowY:"auto", minHeight:0 }}>
+
             {/* Cards de linha */}
             <div style={{ padding:"14px 20px", borderBottom:`1px solid ${T.borderL}`,
-              background:"#FAFBFF", flexShrink:0 }}>
+              background:"#FAFBFF" }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
                 <span style={{ fontSize:11, fontWeight:700, color:T.sub, letterSpacing:0.6, textTransform:"uppercase" }}>
                   Linhas de produto
@@ -474,7 +477,8 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, o
 
             {/* Busca + ações */}
             <div style={{ padding:"10px 20px", borderBottom:`1px solid ${T.borderL}`,
-              display:"flex", gap:8, alignItems:"center", flexShrink:0 }}>
+              display:"flex", gap:8, alignItems:"center",
+              position:"sticky", top:0, background:"#fff", zIndex:2 }}>
               <div style={{ flex:1, position:"relative" }}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                   stroke={T.hint} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
@@ -504,8 +508,8 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, o
               )}
             </div>
 
-            {/* Lista de produtos — SCROLLÁVEL */}
-            <div style={{ flex:1, overflowY:"auto", minHeight:0 }}>
+            {/* Lista de produtos */}
+            <div>
               {filtrados.length === 0 && (
                 <div style={{ padding:"40px 24px", textAlign:"center", color:T.hint, fontSize:13 }}>
                   Nenhum produto encontrado.
@@ -575,14 +579,19 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, o
                 );
               })}
             </div>
+
+            </div>{/* fecha área scrollável */}
           </div>
         )}
 
         {/* ── ABA ALERTA ── */}
         {aba === "alerta" && (
           <div style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
+            <div style={{ flex:1, overflowY:"auto", minHeight:0 }}>
+
             <div style={{ padding:"12px 20px", background:"#FFFBEB",
-              borderBottom:`1px solid #FDE68A`, fontSize:12, color:"#92400E", flexShrink:0 }}>
+              borderBottom:`1px solid #FDE68A`, fontSize:12, color:"#92400E",
+              position:"sticky", top:0, zIndex:2 }}>
               <span style={{ fontWeight:700 }}>⚠ Alerta pós-upload</span> — marque os produtos que devem
               aparecer no popup ao importar uma nova planilha.
               {linhaAtiva && (
@@ -607,7 +616,7 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, o
                     color:T.text, background:T.snow, boxSizing:"border-box" }}/>
               </div>
             </div>
-            <div style={{ flex:1, overflowY:"auto", minHeight:0 }}>
+            <div>
               {todosProdutos
                 .filter(p => {
                   if (!selecionados.has(p.cod)) return false;
@@ -661,6 +670,7 @@ function SettingsModal({ allRows, meusCodigos, onSave, onClose, alertaCodigos, o
                 })
               }
             </div>
+            </div>{/* fecha área scrollável */}
           </div>
         )}
 
@@ -1414,13 +1424,13 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
                 {[
                   { h:"Código",          key:"codProduto",   num:true  },
                   { h:"Produto",         key:"produto",      num:false },
+                  { h:"Preço",           key:"preco",        num:true  },
                   { h:"Estoque",         key:"estoque",      num:true  },
                   { h:"Dias de Estoque", key:"diasEstoque",  num:true  },
                   { h:"Situação",        key:"situacao",     num:false },
                   { h:colLabels.vendasJun,   key:"vendasJun",    num:true  },
                   { h:colLabels.vendasMai,   key:"vendasMai",    num:true  },
                   { h:"Média Trim.",     key:"mediaTrim",    num:true  },
-                  { h:"Preço",           key:"preco",        num:true  },
                 ].map(({ h, key }, colIdx) => {
                   const active = sortFilial === key;
                   const isFixed = colIdx === 0 || colIdx === 1;
@@ -1467,6 +1477,8 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
                     position:"sticky", left:80, zIndex:1,
                     background:"#fff", boxShadow:"2px 0 6px rgba(0,0,0,0.06)" }}
                     title={r.produto}>{r.produto}</td>
+                  <td style={{ padding:"9px 14px", whiteSpace:"nowrap", fontWeight:600 }}>
+                    {r.preco.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td>
                   <td style={{ padding:"9px 14px", textAlign:"center", fontWeight:800,
                     color:r.estoque===0?T.coral:T.text }}>{r.estoque}</td>
                   {/* Dias de Estoque — já calculado no sortedBase */}
@@ -1487,8 +1499,6 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
                   <td style={{ padding:"9px 14px", textAlign:"center", color:T.sub }}>{r.vendasJun}</td>
                   <td style={{ padding:"9px 14px", textAlign:"center", color:T.sub }}>{r.vendasMai}</td>
                   <td style={{ padding:"9px 14px", textAlign:"center", color:T.sub }}>{r.mediaTrim}</td>
-                  <td style={{ padding:"9px 14px", whiteSpace:"nowrap", fontWeight:600 }}>
-                    {r.preco.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td>
                 </tr>
               ))}
             </tbody>
