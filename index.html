@@ -1216,6 +1216,7 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
   const [sortFilial, setSortFilial] = useState(null);
   const [sortDirFilial, setSortDirFilial] = useState("asc");
   const [top10Aberto, setTop10Aberto] = useState(false);
+  const [semVendaAberto, setSemVendaAberto] = useState(false);
 
   // situacaoFiltro é um array vindo do estado global (sitF)
   const sitAtiva = Array.isArray(situacaoFiltro) ? situacaoFiltro : (situacaoFiltro ? [situacaoFiltro] : []);
@@ -1265,6 +1266,14 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
       .slice(0, 10);
   }, [base]);
   const maxVendaTop10 = Math.max(...top10.map(r => r.vendasMai), 1);
+
+  // Produtos sem venda no mês (coluna P = 0)
+  const semVenda = useMemo(() =>
+    base
+      .filter(r => r.vendasMai === 0)
+      .map(r => ({ ...r, diasEstoque: 0 }))
+      .sort((a,b) => a.produto.localeCompare(b.produto))
+  , [base]);
 
   function pill(sit, count, bg, color, dot) {
     if (count===0) return null;
@@ -1333,7 +1342,7 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
           <span style={{ fontSize:12, color:T.sub, marginLeft:4 }}>
             {totalVendas} vend.
           </span>
-          <button onClick={e=>{ e.stopPropagation(); setTop10Aberto(v=>!v); if(!aberto) setAberto(true); }}
+          <button onClick={e=>{ e.stopPropagation(); setTop10Aberto(v=>!v); setSemVendaAberto(false); if(!aberto) setAberto(true); }}
             style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px",
               borderRadius:20, border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
               background: top10Aberto ? "#1B7FE8" : "#EEF6FF",
@@ -1344,6 +1353,18 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
               <path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>
             </svg>
             Top 10
+          </button>
+          <button onClick={e=>{ e.stopPropagation(); setSemVendaAberto(v=>!v); setTop10Aberto(false); if(!aberto) setAberto(true); }}
+            style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px",
+              borderRadius:20, border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
+              background: semVendaAberto ? "#DC2626" : "#FEE2E2",
+              color: semVendaAberto ? "#fff" : "#DC2626",
+              transition:"all 0.15s" }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+            </svg>
+            Sem venda {semVenda.length > 0 && `(${semVenda.length})`}
           </button>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.hint}
             strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
@@ -1403,31 +1424,96 @@ function FilialBlock({ filial, itens, situacaoFiltro, produtosSelecionados, onSi
           </div>
         </div>
       )}
+
+      {/* Painel Sem Venda */}
+      {semVendaAberto && aberto && (
+        <div style={{ borderBottom:`1px solid ${T.borderL}` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8,
+            padding:"12px 18px", background:"#FFF5F5" }}>
+            <div style={{ width:22, height:22, borderRadius:6, background:"#DC2626",
+              display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                stroke="#fff" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+              </svg>
+            </div>
+            <span style={{ fontSize:13, fontWeight:700, color:"#DC2626" }}>
+              Sem venda no mês · {colLabels.vendasMai}
+            </span>
+            <span style={{ fontSize:11, color:T.hint }}>
+              {semVenda.length} produto{semVenda.length!==1?"s":""}
+            </span>
+          </div>
+          {semVenda.length === 0 ? (
+            <div style={{ fontSize:12, color:T.hint, textAlign:"center",
+              padding:"16px", background:"#FFF5F5" }}>
+              Todos os produtos tiveram vendas neste mês! 🎉
+            </div>
+          ) : (
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                <thead>
+                  <tr style={{ background:"#FFF5F5" }}>
+                    {["Código","Produto","Preço","Estoque","Situação","Dias Est.",colLabels.vendasJun,colLabels.vendasMai].map(h => (
+                      <th key={h} style={{ padding:"7px 14px", textAlign:"left", fontWeight:700,
+                        fontSize:10, color:"#991B1B", borderBottom:"1px solid #FECACA",
+                        whiteSpace:"nowrap", letterSpacing:0.4, textTransform:"uppercase" }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {semVenda.map((r, i) => {
+                    const info = diasEstoqueInfo(r.diasEstoque || 0);
+                    return (
+                      <tr key={r.codProduto}
+                        style={{ background: i%2===0 ? "#fff" : "#FFFAFA",
+                          borderBottom:"1px solid #FEE2E2" }}>
+                        <td style={{ padding:"8px 14px", color:T.sub, fontWeight:600,
+                          fontSize:12, whiteSpace:"nowrap" }}>{r.codProduto}</td>
+                        <td style={{ padding:"8px 14px", fontWeight:600, maxWidth:200,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}
+                          title={r.produto}>{r.produto}</td>
+                        <td style={{ padding:"8px 14px", whiteSpace:"nowrap", fontWeight:600 }}>
+                          {r.preco.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td>
+                        <td style={{ padding:"8px 14px", textAlign:"center", fontWeight:800,
+                          color:r.estoque===0?"#DC2626":T.text }}>{r.estoque}</td>
+                        <td style={{ padding:"8px 14px" }}><Badge sit={r.situacao}/></td>
+                        <td style={{ padding:"8px 14px", textAlign:"center" }}
+                          title={`${r.diasEstoque||0} dias de estoque — ${info.label}`}>
+                          <span style={{ display:"inline-block", fontWeight:700, fontSize:10,
+                            color:info.cor, background:info.bg, borderRadius:8, padding:"2px 6px" }}>
+                            {info.icon} {(r.diasEstoque||0) === 0 ? "0d" : `${r.diasEstoque}d`}
+                          </span>
+                        </td>
+                        <td style={{ padding:"8px 14px", textAlign:"center",
+                          color:T.sub }}>{r.vendasJun}</td>
+                        <td style={{ padding:"8px 14px", textAlign:"center",
+                          fontWeight:700, color:"#DC2626" }}>0</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {aberto && (
         <div>
           {/* Barra de resumo dentro da área expandida */}
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-            padding:"10px 18px", background:"#FAFBFF", borderBottom:`1px solid ${T.borderL}` }}>
+          <div style={{ padding:"10px 18px", background:"#FAFBFF",
+            borderBottom:`1px solid ${T.borderL}` }}>
             <span style={{ fontSize:12, color:T.sub, fontWeight:600 }}>
               Total: {totalVendas} unidades vendidas
             </span>
-            <button onClick={()=>setTop10Aberto(v=>!v)}
-              style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px",
-                borderRadius:20, border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
-                background: top10Aberto ? "#1B7FE8" : "#EEF6FF",
-                color: top10Aberto ? "#fff" : "#1B7FE8",
-                transition:"all 0.15s" }}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>
-              </svg>
-              Top 10
-            </button>
           </div>
 
-        <div style={{ overflowX:"auto" }}>
+        <div style={{ overflowX:"auto", overflowY:"auto", maxHeight:"calc(100vh - 220px)" }}>
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
-            <thead>
+            <thead style={{ position:"sticky", top:0, zIndex:10 }}>
               <tr style={{ background:"#FAFBFF" }}>
                 {[
                   { h:"Código",          key:"codProduto",   num:true  },
@@ -2319,202 +2405,149 @@ function App() {
       <div style={{ display:"flex", minHeight:"100vh", background:"#0D1F5C",
         fontFamily:"'Inter','Segoe UI',sans-serif" }}>
 
-        {/* Sidebar inicial */}
-        <aside style={{ width:220, background:"rgba(255,255,255,0.04)",
-          borderRight:"1px solid rgba(255,255,255,0.07)",
-          display:"flex", flexDirection:"column",
-          position:"fixed", top:0, left:0, bottom:0 }}>
-          <div style={{ padding:"18px 16px", borderBottom:"1px solid rgba(255,255,255,0.07)",
-            display:"flex", justifyContent:"center" }}>
-            <img src={LOGO_INDIANA} alt="Indiana Business · Eurofarma"
-              style={{ height:80, width:"auto", objectFit:"contain" }}/>
-          </div>
-          <div style={{ flex:1, padding:"20px 20px 0" }}>
-            <div style={{ fontSize:11, color:"rgba(255,255,255,0.25)", lineHeight:1.7 }}>
-              Faça o upload da planilha para acessar o painel completo com estoque, vendas e análises por filial.
+        {/* Área central — ocupa tela toda */}
+        <div style={{ flex:1, display:"flex", flexDirection:"column",
+          padding:"32px 80px 0", overflowY:"auto" }}>
+
+          {/* Conteúdo central */}
+          <div style={{ flex:1, display:"flex", flexDirection:"column",
+            alignItems:"center", width:"100%", maxWidth:780, margin:"0 auto" }}>
+
+            {/* Logo + título */}
+            <div style={{ textAlign:"center", marginBottom:28 }}>
+              <img src={LOGO_INDIANA} alt="Indiana Business · Eurofarma"
+                style={{ height:100, width:"auto", objectFit:"contain", marginBottom:16 }}/>
+              <h1 style={{ color:"#fff", fontSize:30, fontWeight:800, margin:"0 0 6px", letterSpacing:-0.5 }}>
+                Bem-vindo ao seu painel
+              </h1>
+              <p style={{ color:T.mint, fontSize:17, fontWeight:700, margin:"0 0 10px" }}>
+                A plataforma que facilita a vida do Propagandista
+              </p>
+              <a href="https://youtu.be/wN1Qp4MIPiM?is=ntqs1IUQBOanMG2w"
+                target="_blank" rel="noopener noreferrer"
+                style={{ display:"inline-flex", alignItems:"center", gap:8,
+                  background:"rgba(255,0,0,0.18)", border:"1px solid rgba(255,80,80,0.35)",
+                  borderRadius:20, padding:"7px 16px", textDecoration:"none",
+                  color:"#ff6b6b", fontSize:12, fontWeight:600, transition:"all 0.2s" }}
+                onMouseEnter={e=>{ e.currentTarget.style.background="rgba(255,0,0,0.3)"; }}
+                onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,0,0,0.18)"; }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="#ff4444">
+                  <path d="M22.54 6.42a2.78 2.78 0 00-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46A2.78 2.78 0 001.46 6.42 29 29 0 001 12a29 29 0 00.46 5.58A2.78 2.78 0 003.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 001.95-1.95A29 29 0 0023 12a29 29 0 00-.46-5.58z"/>
+                  <polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" fill="white"/>
+                </svg>
+                Tutorial em vídeo
+              </a>
             </div>
-            <div style={{ marginTop:24, display:"flex", flexDirection:"column", gap:10 }}>
+
+            {/* Grid 3×2 de funcionalidades */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)",
+              gap:14, width:"100%", marginBottom:28 }}>
               {[
-                "Estoque consolidado",
-                "Vendas por período",
-                "Filtros por filial",
-                "Gráficos de tendência",
-                "Top 10 lojas que mais vendem",
-                "Top 5 de itens mais vendidos por loja",
-                "Localização geográfica",
-                "Faltas por loja",
-              ].map(f=>(
-                <div key={f} style={{ display:"flex", alignItems:"center", gap:8,
-                  fontSize:12, color:"rgba(255,255,255,0.3)" }}>
-                  <span style={{ color:"#4DAAFF", fontSize:14 }}>✓</span>{f}
+                { icon:"📦", titulo:"Estoque consolidado",      desc:"Visão completa do estoque por produto em todas as lojas da rede" },
+                { icon:"📈", titulo:"Vendas por período",       desc:"Compare vendas dos últimos 3 meses com histórico e média trimestral" },
+                { icon:"🏆", titulo:"Top 10 lojas",             desc:"Ranking das lojas que mais vendem com destaque automático" },
+                { icon:"🗂️",  titulo:"Top 5 por loja",          desc:"Os 5 produtos mais vendidos em cada farmácia da rede" },
+                { icon:"📍", titulo:"Localização geográfica",   desc:"Mapa com todas as cidades e farmácias atendidas pela rede" },
+                { icon:"🚨", titulo:"Faltas por loja",          desc:"Identifique rapidamente produtos em falta em cada ponto de venda" },
+              ].map(({ icon, titulo, desc }) => (
+                <div key={titulo} style={{ background:"rgba(255,255,255,0.05)",
+                  border:"1px solid rgba(77,170,255,0.15)", borderRadius:14, padding:"18px 16px",
+                  transition:"all 0.2s", cursor:"default" }}
+                  onMouseEnter={e=>{ e.currentTarget.style.background="rgba(77,170,255,0.1)"; e.currentTarget.style.borderColor="rgba(77,170,255,0.35)"; }}
+                  onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,255,255,0.05)"; e.currentTarget.style.borderColor="rgba(77,170,255,0.15)"; }}>
+                  <div style={{ fontSize:26, marginBottom:10 }}>{icon}</div>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#fff", marginBottom:6 }}>{titulo}</div>
+                  <div style={{ fontSize:11, color:"rgba(255,255,255,0.4)", lineHeight:1.5 }}>{desc}</div>
                 </div>
               ))}
             </div>
 
-            {/* Autor + WhatsApp */}
-            <div style={{ marginTop:24, paddingTop:20, borderTop:"1px solid rgba(255,255,255,0.07)",
-              display:"flex", flexDirection:"column", gap:8 }}>
-              <span style={{ fontSize:10, color:"rgba(255,255,255,0.25)", lineHeight:1.5 }}>
-                Desenvolvido por{" "}
-                <span style={{ color:"rgba(255,255,255,0.5)", fontWeight:600 }}>Diogo Duarte</span>
-                <br/>Propagandista Eurofarma
-              </span>
-              <a href="https://wa.me/5531971860011?text=Ol%C3%A1%20Diogo!%20Tenho%20uma%20sugest%C3%A3o%20para%20o%20Painel%20do%20Representante."
-                target="_blank" rel="noopener noreferrer"
-                style={{ display:"inline-flex", alignItems:"center", gap:6,
-                  padding:"6px 10px", borderRadius:10, textDecoration:"none",
-                  background:"rgba(37,211,102,0.1)", border:"1px solid rgba(37,211,102,0.2)",
-                  color:"#4ADE80", fontSize:10, fontWeight:600, transition:"all 0.15s" }}
-                onMouseEnter={e=>{ e.currentTarget.style.background="rgba(37,211,102,0.2)"; }}
-                onMouseLeave={e=>{ e.currentTarget.style.background="rgba(37,211,102,0.1)"; }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="#4ADE80">
-                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-                </svg>
-                Sugestões e melhorias
-              </a>
-            </div>
-          </div>
-          <div style={{ padding:"20px", borderTop:"1px solid rgba(255,255,255,0.07)",
-            fontSize:11, color:"rgba(255,255,255,0.2)",
-            display:"flex", alignItems:"center", gap:6 }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
-            </svg>
-            Dados apenas no seu navegador
-          </div>
-        </aside>
+            {/* Guia de passos + Upload lado a lado */}
+            <div style={{ display:"flex", gap:20, width:"100%", marginBottom:24, alignItems:"flex-start" }}>
 
-        {/* Área central */}
-        <div style={{ marginLeft:220, flex:1, display:"flex", flexDirection:"column",
-          alignItems:"center", justifyContent:"center", padding:"40px 40px 0" }}>
-
-          {/* Conteúdo central */}
-          <div style={{ flex:1, display:"flex", flexDirection:"column",
-            alignItems:"center", justifyContent:"center", width:"100%", maxWidth:560 }}>
-
-          {/* Logo */}
-          <div style={{ marginBottom:28, textAlign:"center" }}>
-            <img src={LOGO_INDIANA} alt="Indiana Business · Eurofarma"
-              style={{ height:140, width:"auto", objectFit:"contain" }}/>
-          </div>
-
-          <div style={{ textAlign:"center", marginBottom:32 }}>
-            <h1 style={{ color:"#fff", fontSize:28, fontWeight:800, margin:"0 0 6px",
-              letterSpacing:-0.5 }}>
-              Bem-vindo ao seu painel
-            </h1>
-            <p style={{ color:T.mint, fontSize:17, fontWeight:700, margin:"0 0 10px", letterSpacing:0.2 }}>
-              A plataforma que facilita a vida do Propagandista
-            </p>
-            <p style={{ color:"rgba(255,255,255,0.4)", fontSize:13, margin:"0 0 16px" }}>
-              Carregue a planilha da rede para começar
-            </p>
-            <a href="https://youtu.be/wN1Qp4MIPiM?is=ntqs1IUQBOanMG2w"
-              target="_blank" rel="noopener noreferrer"
-              style={{ display:"inline-flex", alignItems:"center", gap:8,
-                background:"rgba(255,0,0,0.18)", border:"1px solid rgba(255,80,80,0.35)",
-                borderRadius:20, padding:"8px 18px", textDecoration:"none",
-                color:"#ff6b6b", fontSize:13, fontWeight:600,
-                transition:"all 0.2s" }}
-              onMouseEnter={e=>{ e.currentTarget.style.background="rgba(255,0,0,0.3)"; e.currentTarget.style.borderColor="rgba(255,80,80,0.6)"; }}
-              onMouseLeave={e=>{ e.currentTarget.style.background="rgba(255,0,0,0.18)"; e.currentTarget.style.borderColor="rgba(255,80,80,0.35)"; }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="#ff4444">
-                <path d="M22.54 6.42a2.78 2.78 0 00-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46A2.78 2.78 0 001.46 6.42 29 29 0 001 12a29 29 0 00.46 5.58A2.78 2.78 0 003.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 001.95-1.95A29 29 0 0023 12a29 29 0 00-.46-5.58z"/>
-                <polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" fill="white"/>
-              </svg>
-              Como usar a plataforma — Tutorial em vídeo
-            </a>
-          </div>
-
-          {/* Guia passo a passo */}
-          <div style={{ width:"100%", maxWidth:480, marginBottom:28,
-            background:"rgba(255,255,255,0.05)",
-            border:"1px solid rgba(77,170,255,0.2)",
-            borderRadius:16, padding:"20px 24px" }}>
-            <div style={{ fontSize:11, fontWeight:700, color:"#4DAAFF",
-              letterSpacing:1, textTransform:"uppercase", marginBottom:16 }}>
-              Como exportar a planilha do site da Indiana Business
-            </div>
-            {[
-              { n:1, text:"Acesse a plataforma da Indiana Business" },
-              { n:2, text:"Marque todos os produtos desejados" },
-              { n:3, text:'Clique em "Exportar dados"' },
-              { n:4, text:"Salve a planilha no seu computador" },
-              { n:5, text:"Importe a planilha abaixo neste painel" },
-            ].map(({ n, text }) => (
-              <div key={n}>
-                <div style={{ display:"flex", alignItems:"flex-start", gap:12,
-                  marginBottom: n < 5 ? 8 : 0 }}>
-                  <div style={{ width:24, height:24, borderRadius:"50%", flexShrink:0,
-                    background: n===5 ? "#1B7FE8" : "rgba(255,255,255,0.07)",
-                    border: n===5 ? "none" : "1px solid rgba(255,255,255,0.12)",
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                    fontSize:11, fontWeight:800,
-                    color: n===5 ? "#fff" : "rgba(255,255,255,0.4)" }}>
-                    {n}
-                  </div>
-                  <div style={{ paddingTop:3, fontSize:13, lineHeight:1.4,
-                    color: n===5 ? "#fff" : "rgba(255,255,255,0.5)",
-                    fontWeight: n===5 ? 600 : 400 }}>
-                    {text}
-                  </div>
+              {/* Guia passo a passo */}
+              <div style={{ flex:1, background:"rgba(255,255,255,0.04)",
+                border:"1px solid rgba(77,170,255,0.2)", borderRadius:14, padding:"18px 20px" }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#4DAAFF",
+                  letterSpacing:1, textTransform:"uppercase", marginBottom:14 }}>
+                  Como exportar a planilha
                 </div>
-                {n === 1 && (
-                  <div style={{ marginLeft:36, marginBottom:12 }}>
-                    <a href="https://business.farmaciaindiana.com.br/login"
-                      target="_blank" rel="noopener noreferrer"
-                      style={{ display:"inline-flex", alignItems:"center", gap:6,
-                        fontSize:11, fontWeight:600, color:"#4DAAFF",
-                        textDecoration:"none", padding:"4px 10px",
-                        background:"rgba(77,170,255,0.1)",
-                        border:"1px solid rgba(77,170,255,0.25)",
-                        borderRadius:8, transition:"all 0.15s" }}
-                      onMouseEnter={e=>{ e.currentTarget.style.background="rgba(77,170,255,0.2)"; }}
-                      onMouseLeave={e=>{ e.currentTarget.style.background="rgba(77,170,255,0.1)"; }}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
-                        <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-                      </svg>
-                      business.farmaciaindiana.com.br
-                    </a>
+                {[
+                  { n:1, text:"Acesse a plataforma da Indiana Business" },
+                  { n:2, text:"Marque todos os produtos desejados" },
+                  { n:3, text:'Clique em "Exportar dados"' },
+                  { n:4, text:"Salve a planilha no seu computador" },
+                  { n:5, text:"Importe a planilha ao lado neste painel" },
+                ].map(({ n, text }) => (
+                  <div key={n}>
+                    <div style={{ display:"flex", alignItems:"flex-start", gap:10, marginBottom:n<5?8:0 }}>
+                      <div style={{ width:22, height:22, borderRadius:"50%", flexShrink:0,
+                        background:n===5?"#1B7FE8":"rgba(255,255,255,0.07)",
+                        border:n===5?"none":"1px solid rgba(255,255,255,0.12)",
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                        fontSize:10, fontWeight:800, color:n===5?"#fff":"rgba(255,255,255,0.4)" }}>
+                        {n}
+                      </div>
+                      <div style={{ paddingTop:2, fontSize:12, lineHeight:1.4,
+                        color:n===5?"#fff":"rgba(255,255,255,0.5)", fontWeight:n===5?600:400 }}>
+                        {text}
+                      </div>
+                    </div>
+                    {n === 1 && (
+                      <div style={{ marginLeft:32, marginBottom:10 }}>
+                        <a href="https://business.farmaciaindiana.com.br/login"
+                          target="_blank" rel="noopener noreferrer"
+                          style={{ display:"inline-flex", alignItems:"center", gap:5,
+                            fontSize:10, fontWeight:600, color:"#4DAAFF", textDecoration:"none",
+                            padding:"3px 8px", background:"rgba(77,170,255,0.1)",
+                            border:"1px solid rgba(77,170,255,0.25)", borderRadius:7 }}>
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
+                            <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                          </svg>
+                          business.farmaciaindiana.com.br
+                        </a>
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
 
-          {/* Upload zone */}
-          <UploadZone onData={handleData}/>
-          <p style={{ color:"rgba(255,255,255,0.2)", fontSize:12, marginTop:16 }}>
-            Compatível com .xls e .xlsx · Dados processados localmente
-          </p>
+              {/* Upload */}
+              <div style={{ flex:1, display:"flex", flexDirection:"column",
+                alignItems:"center", justifyContent:"center" }}>
+                <UploadZone onData={handleData}/>
+                <p style={{ color:"rgba(255,255,255,0.2)", fontSize:11, marginTop:12, textAlign:"center" }}>
+                  Compatível com .xls e .xlsx<br/>Dados processados localmente
+                </p>
+              </div>
+            </div>
+
           </div>{/* fecha conteúdo central */}
 
-        {/* Rodapé — fluxo natural, não sobrepõe nada */}
-        <div style={{ width:"100%", padding:"14px 0", marginTop:24,
-          display:"flex", alignItems:"center", justifyContent:"space-between",
-          borderTop:"1px solid rgba(255,255,255,0.06)" }}>
-          <span style={{ fontSize:11, color:"rgba(255,255,255,0.2)" }}>
-            Desenvolvido por <span style={{ color:"rgba(255,255,255,0.45)", fontWeight:600 }}>Diogo Duarte</span> · Indiana Business · Eurofarma
-          </span>
-          <a href="https://wa.me/5531971860011?text=Ol%C3%A1%20Diogo%2C%20tenho%20uma%20sugest%C3%A3o%20para%20o%20Painel%20do%20Representante%3A%20"
-            target="_blank" rel="noopener noreferrer"
-            title="Enviar sugestão pelo WhatsApp"
-            style={{ display:"inline-flex", alignItems:"center", gap:7,
-              background:"rgba(37,211,102,0.12)", border:"1px solid rgba(37,211,102,0.25)",
-              borderRadius:20, padding:"6px 14px", textDecoration:"none",
-              color:"#4ADE80", fontSize:11, fontWeight:600, transition:"all 0.2s" }}
-            onMouseEnter={e=>{ e.currentTarget.style.background="rgba(37,211,102,0.22)"; e.currentTarget.style.borderColor="rgba(37,211,102,0.5)"; }}
-            onMouseLeave={e=>{ e.currentTarget.style.background="rgba(37,211,102,0.12)"; e.currentTarget.style.borderColor="rgba(37,211,102,0.25)"; }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="#4ADE80">
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-            </svg>
-            Sugestões e melhorias
-          </a>
+          {/* Rodapé */}
+          <div style={{ width:"100%", maxWidth:780, margin:"0 auto",
+            padding:"14px 0", borderTop:"1px solid rgba(255,255,255,0.06)",
+            display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <span style={{ fontSize:11, color:"rgba(255,255,255,0.2)" }}>
+              Desenvolvido por <span style={{ color:"rgba(255,255,255,0.45)", fontWeight:600 }}>Diogo Duarte</span> · Indiana Business · Eurofarma
+            </span>
+            <a href="https://wa.me/5531971860011?text=Ol%C3%A1%20Diogo%2C%20tenho%20uma%20sugest%C3%A3o%20para%20o%20Painel%20do%20Representante%3A%20"
+              target="_blank" rel="noopener noreferrer"
+              style={{ display:"inline-flex", alignItems:"center", gap:7,
+                background:"rgba(37,211,102,0.12)", border:"1px solid rgba(37,211,102,0.25)",
+                borderRadius:20, padding:"6px 14px", textDecoration:"none",
+                color:"#4ADE80", fontSize:11, fontWeight:600, transition:"all 0.2s" }}
+              onMouseEnter={e=>{ e.currentTarget.style.background="rgba(37,211,102,0.22)"; }}
+              onMouseLeave={e=>{ e.currentTarget.style.background="rgba(37,211,102,0.12)"; }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="#4ADE80">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+              </svg>
+              Sugestões e melhorias
+            </a>
+          </div>
         </div>
-        </div>{/* fecha área central */}
       </div>
     );
   }
